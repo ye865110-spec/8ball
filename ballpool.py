@@ -74,7 +74,6 @@ def get_line_circle_intersection(p1, p2, center, r):
     return (x1 + min(valid_ts) * dx, y1 + min(valid_ts) * dy)
 
 def calculate_ray_cast_with_bounces(start_pos, angle, table_bounds, obstacle_balls, ball_radius, max_bounces=4):
-    """حساب المسار الارتدادي الحر بناءً على زاوية الماوس والعصا"""
     points = [start_pos]
     curr_pos = list(start_pos)
     curr_dir = [math.cos(angle), math.sin(angle)]
@@ -161,7 +160,10 @@ def main():
             
             if keyboard.is_pressed('ctrl+q'): break
 
-            # قراءة اختصارات الجيوب (من 1 إلى 6) واختصار التصفير (0) والمسح (X)
+            # لتثبيت الأداة وحل مشكلة الاختفاء عند الكليك: نجبر النافذة على البقاء TOPMOST في كل فريم
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, 
+                                  win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+
             for n in range(1, 7):
                 if keyboard.is_pressed(str(n)): selected_pocket_index = n - 1
             if keyboard.is_pressed('0'): selected_pocket_index = None
@@ -170,7 +172,7 @@ def main():
             screen.fill(TRANSPARENT_COLOR)
             mx, my = win32api.GetCursorPos()
             
-            # فحص إذا كان زر الماوس الأيسر مضغوطاً حالياً (تفعيل وضع حركة العصا)
+            # فحص ضغط الماوس الأيسر لتفعيل تتبع العصا الحر
             mouse_click_active = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000
 
             full_img = np.array(sct.grab(full_monitor))
@@ -190,7 +192,6 @@ def main():
             detected_radius = 16
             hovered_ball = None
 
-            # رسم الجيوب الستة وثبيت أرقامها
             pockets = [
                 (table["left"] + 25, table["top"] + 25), (table["left"] + table["width"] // 2, table["top"] + 15), (table["left"] + table["width"] - 25, table["top"] + 25),
                 (table["left"] + 25, table["top"] + table["height"] - 25), (table["left"] + table["width"] // 2, table["top"] + table["height"] - 15), (table["left"] + table["width"] - 25, table["top"] + table["height"] - 25)
@@ -216,7 +217,6 @@ def main():
                     if calculate_distance((mx, my), (cx, cy)) <= r:
                         hovered_ball = (cx, cy)
 
-            # معالجة وتنعيم حركة الكرات لمنع الرعشة
             if raw_white_center:
                 smooth_white_center = apply_smoothing(raw_white_center, smooth_white_center, ALPHA)
                 pygame.draw.circle(screen, WHITE, smooth_white_center, detected_radius, 2)
@@ -234,14 +234,13 @@ def main():
 
             smooth_target_balls = {b: b for b in current_smooth_targets}
 
-            # تفعيل زر Z لقفل الكرة المستهدفة عند الوقوف عليها بالماوس
             if keyboard.is_pressed('z') and hovered_ball and hovered_ball != smooth_white_center:
                 locked_ball_center = hovered_ball
 
-            # --- محرك حساب المسارات والتوجيه الجديد ---
+            # تتبع ورسم المسارات
             if smooth_white_center:
                 if mouse_click_active:
-                    # [الوضع الأول]: عند ضغط كليك الماوس، تتحرك الخطوط بحرية تامة 360 درجة مع العصا والماوس
+                    # [الوضع الحر مع العصا]: يتحرك 360 درجة عند الضغط على الماوس
                     stick_angle = math.atan2(my - smooth_white_center[1], mx - smooth_white_center[0])
                     bounce_pts, hit_ball, ghost_pos = calculate_ray_cast_with_bounces(smooth_white_center, stick_angle, table, current_smooth_targets, detected_radius)
                     
@@ -257,7 +256,7 @@ def main():
                             pygame.draw.line(screen, WHITE if idx == 0 else GREEN, bounce_pts[idx], bounce_pts[idx+1], 2)
                 
                 elif locked_ball_center:
-                    # [الوضع الثاني]: عند غياب الكليك، يتم التوجيه التلقائي المبني على قفل الكرة والبوكت المحدد
+                    # [الوضع التلقائي]: عند ترك الماوس، يتوجه تلقائياً للكرة المقفولة والبوكت المحدد
                     target_pocket = pockets[selected_pocket_index] if selected_pocket_index is not None else min(pockets, key=lambda p: calculate_distance(locked_ball_center, p))
                     ghost_pos = get_ghost_ball_position(locked_ball_center, target_pocket, detected_radius)
                     
@@ -265,7 +264,6 @@ def main():
                     pygame.draw.circle(screen, WHITE, ghost_pos, detected_radius, 1)
                     pygame.draw.line(screen, YELLOW, locked_ball_center, target_pocket, 3)
                     
-                    # رسم مسار ارتداد الكرة الثانية (الوردي) التكتيكي
                     ref_dx, ref_dy = locked_ball_center[0] - ghost_pos[0], locked_ball_center[1] - ghost_pos[1]
                     ref_dist = math.sqrt(ref_dx**2 + ref_dy**2)
                     if ref_dist > 0:
