@@ -23,7 +23,7 @@ cv2.setNumThreads(0)
 
 FPS = 240
 
-BALL_RADIUS = 16
+BALL_RADIUS = 22
 
 SMOOTHING = 0.18
 
@@ -647,7 +647,7 @@ while running:
             WHITE,
             white_pos,
             ghost_pos,
-            2
+            5
         )
 
         pygame.draw.line(
