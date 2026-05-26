@@ -9,9 +9,10 @@ import numpy as np
 import math
 import sys
 import time
+import keyboard
 
 # =========================
-# OpenCV تحسين
+# تحسين OpenCV
 # =========================
 
 cv2.setUseOptimized(True)
@@ -29,7 +30,7 @@ SMOOTHING = 0.18
 
 MAX_BALL_JUMP = 50
 
-INNER_OFFSET = BALL_RADIUS + 18
+INNER_OFFSET = BALL_RADIUS + 22
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
 SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
@@ -254,110 +255,105 @@ while running:
     pygame.event.pump()
 
     # =========================
-    # Events
+    # التحكم
     # =========================
 
-    for event in pygame.event.get():
+    if keyboard.is_pressed("ctrl+q"):
+        running = False
 
-        if event.type == pygame.QUIT:
-            running = False
+    # =========================
+    # تحديد الكرة
+    # =========================
 
-        if event.type == pygame.KEYDOWN:
+    if keyboard.is_pressed("z"):
 
-            # خروج
+        try:
 
-            if event.key == pygame.K_q:
+            mx, my = win32api.GetCursorPos()
 
-                if pygame.key.get_mods() & pygame.KMOD_CTRL:
-                    running = False
+            if len(smooth_targets) > 0:
 
-            # قفل الكرة
+                nearest = min(
+                    smooth_targets,
+                    key=lambda b: distance(
+                        b,
+                        (mx, my)
+                    )
+                )
 
-            elif event.key == pygame.K_z:
+                if distance(nearest, (mx, my)) < 35:
 
-                try:
+                    locked_ball = nearest
 
-                    mx, my = win32api.GetCursorPos()
+                    time.sleep(0.15)
 
-                    if len(smooth_targets) > 0:
+        except:
+            pass
 
-                        nearest = min(
-                            smooth_targets,
-                            key=lambda b: distance(
-                                b,
-                                (mx, my)
-                            )
-                        )
+    # =========================
+    # إزالة القفل
+    # =========================
 
-                        if distance(nearest, (mx, my)) < 35:
+    if keyboard.is_pressed("x"):
 
-                            locked_ball = nearest
+        locked_ball = None
 
-                except:
-                    pass
+    # =========================
+    # الجيوب
+    # =========================
 
-            # إزالة القفل
+    if keyboard.is_pressed("1"):
+        selected_pocket = 0
 
-            elif event.key == pygame.K_x:
+    elif keyboard.is_pressed("2"):
+        selected_pocket = 1
 
-                locked_ball = None
+    elif keyboard.is_pressed("3"):
+        selected_pocket = 2
 
-            # الجيوب
+    elif keyboard.is_pressed("4"):
+        selected_pocket = 3
 
-            elif event.key == pygame.K_1:
-                selected_pocket = 0
+    elif keyboard.is_pressed("5"):
+        selected_pocket = 4
 
-            elif event.key == pygame.K_2:
-                selected_pocket = 1
+    elif keyboard.is_pressed("6"):
+        selected_pocket = 5
 
-            elif event.key == pygame.K_3:
-                selected_pocket = 2
+    elif keyboard.is_pressed("0"):
+        selected_pocket = None
 
-            elif event.key == pygame.K_4:
-                selected_pocket = 3
+    # =========================
+    # الباندات
+    # =========================
 
-            elif event.key == pygame.K_5:
-                selected_pocket = 4
+    if keyboard.is_pressed("i"):
 
-            elif event.key == pygame.K_6:
-                selected_pocket = 5
+        top_bank = True
+        bottom_bank = False
+        left_bank = False
+        right_bank = False
 
-            elif event.key == pygame.K_0:
-                selected_pocket = None
+    elif keyboard.is_pressed("m"):
 
-            # الباندات
+        bottom_bank = True
+        top_bank = False
+        left_bank = False
+        right_bank = False
 
-            elif event.key == pygame.K_i:
+    elif keyboard.is_pressed("j"):
 
-                top_bank = not top_bank
+        left_bank = True
+        top_bank = False
+        bottom_bank = False
+        right_bank = False
 
-                bottom_bank = False
-                left_bank = False
-                right_bank = False
+    elif keyboard.is_pressed("k"):
 
-            elif event.key == pygame.K_m:
-
-                bottom_bank = not bottom_bank
-
-                top_bank = False
-                left_bank = False
-                right_bank = False
-
-            elif event.key == pygame.K_j:
-
-                left_bank = not left_bank
-
-                top_bank = False
-                bottom_bank = False
-                right_bank = False
-
-            elif event.key == pygame.K_k:
-
-                right_bank = not right_bank
-
-                top_bank = False
-                bottom_bank = False
-                left_bank = False
+        right_bank = True
+        top_bank = False
+        bottom_bank = False
+        left_bank = False
 
     # =========================
     # تثبيت Overlay
@@ -638,16 +634,12 @@ while running:
             int(locked_ball[1])
         )
 
-        # =========================
-        # الخطوط
-        # =========================
-
         pygame.draw.line(
             screen,
             WHITE,
             white_pos,
             ghost_pos,
-            4
+            2
         )
 
         pygame.draw.line(
