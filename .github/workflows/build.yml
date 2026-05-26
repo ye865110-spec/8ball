@@ -6,11 +6,6 @@ on:
       - main
       - master
 
-  pull_request:
-    branches:
-      - main
-      - master
-
 jobs:
 
   build:
@@ -19,34 +14,16 @@ jobs:
 
     steps:
 
-      # =========================
-      # تحميل ملفات المشروع
-      # =========================
-
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      # =========================
-      # تثبيت بايثون
-      # =========================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
-
-      # =========================
-      # تحديث pip
-      # =========================
 
       - name: Upgrade pip
-        run: |
-          python -m pip install --upgrade pip
-
-      # =========================
-      # تثبيت المكتبات
-      # =========================
+        run: python -m pip install --upgrade pip
 
       - name: Install Dependencies
         run: |
@@ -59,29 +36,19 @@ jobs:
           pip install dxcam
           pip install pyinstaller
 
-      # =========================
-      # بناء ملف EXE
-      # =========================
-
       - name: Build EXE
-        run: |
-          pyinstaller ^
-          --onefile ^
-          --noconsole ^
-          --clean ^
-          --collect-all pygame ^
-          --collect-all cv2 ^
-          --hidden-import=dxcam ^
-          --hidden-import=win32gui ^
-          --hidden-import=win32con ^
-          --hidden-import=win32api ^
-          --hidden-import=pygame ^
-          --hidden-import=cv2 ^
+        run: >
+          pyinstaller
+          --onefile
+          --noconsole
+          --clean
+          --collect-all pygame
+          --collect-all cv2
+          --hidden-import=dxcam
+          --hidden-import=win32gui
+          --hidden-import=win32con
+          --hidden-import=win32api
           ballpool.py
-
-      # =========================
-      # رفع الملف النهائي
-      # =========================
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
