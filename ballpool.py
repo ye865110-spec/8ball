@@ -9,9 +9,10 @@ import numpy as np
 import math
 import sys
 import time
+import keyboard
 
 # =========================
-# تحسينات OpenCV
+# تحسين OpenCV
 # =========================
 
 cv2.setUseOptimized(True)
@@ -39,7 +40,7 @@ PINK = (255, 0, 128)
 ORANGE = (255, 165, 0)
 
 # =========================
-# متغيرات
+# متغيرات عامة
 # =========================
 
 locked_ball = None
@@ -47,7 +48,6 @@ selected_pocket = None
 
 smooth_white = None
 smooth_targets = []
-
 smooth_ghost = None
 
 table_region = None
@@ -55,10 +55,11 @@ table_region = None
 last_lock_time = 0
 
 # =========================
-# أدوات
+# أدوات مساعدة
 # =========================
 
 def distance(p1, p2):
+
     return math.hypot(
         p1[0] - p2[0],
         p1[1] - p2[1]
@@ -80,7 +81,7 @@ def smooth(current, previous, alpha=SMOOTHING):
         previous[1] + dy * alpha
     )
 
-def aa_circle(surface, color, pos, radius, width=1):
+def aa_circle(surface, color, pos, radius):
 
     pygame.gfxdraw.aacircle(
         surface,
@@ -89,16 +90,6 @@ def aa_circle(surface, color, pos, radius, width=1):
         radius,
         color
     )
-
-    if width == 0:
-
-        pygame.gfxdraw.filled_circle(
-            surface,
-            int(pos[0]),
-            int(pos[1]),
-            radius,
-            color
-        )
 
 def is_white_ball(roi):
 
@@ -215,7 +206,7 @@ win32gui.ShowWindow(
 )
 
 # =========================
-# Overlay شفاف
+# نافذة Overlay شفافة
 # =========================
 
 styles = win32gui.GetWindowLong(
@@ -268,16 +259,18 @@ running = True
 
 while running:
 
-    dt = clock.tick(FPS) / 1000.0
+    clock.tick(FPS)
 
     for event in pygame.event.get():
 
         if event.type == pygame.QUIT:
             running = False
 
-    keys = pygame.key.get_pressed()
+    # =========================
+    # خروج
+    # =========================
 
-    if keys[pygame.K_q] and keys[pygame.K_LCTRL]:
+    if keyboard.is_pressed("ctrl+q"):
         running = False
 
     # =========================
@@ -306,7 +299,7 @@ while running:
         continue
 
     # =========================
-    # اكتشاف الطاولة مرة واحدة
+    # اكتشاف الطاولة
     # =========================
 
     if table_region is None:
@@ -330,7 +323,7 @@ while running:
         continue
 
     # =========================
-    # تسريع المعالجة
+    # تصغير لتسريع المعالجة
     # =========================
 
     small = cv2.resize(
@@ -374,6 +367,10 @@ while running:
         (5, 5),
         0
     )
+
+    # =========================
+    # اكتشاف الكرات
+    # =========================
 
     circles = cv2.HoughCircles(
         blur,
@@ -438,16 +435,16 @@ while running:
         )
 
     # =========================
-    # اكتشاف الكرات
+    # معالجة الكرات
     # =========================
 
     if circles is not None:
 
-        circles = np.squeeze(circles)
+        circles = np.round(
+            circles[0, :]
+        ).astype("int")
 
-        for c in circles:
-
-            cx, cy, r = c
+        for (cx, cy, r) in circles:
 
             cx = int(cx * 2 + x)
             cy = int(cy * 2 + y)
@@ -455,15 +452,15 @@ while running:
 
             # تجاهل الجيوب
 
-            too_close_to_pocket = False
+            ignore = False
 
             for p in pockets:
 
                 if distance((cx, cy), p) < 35:
-                    too_close_to_pocket = True
+                    ignore = True
                     break
 
-            if too_close_to_pocket:
+            if ignore:
                 continue
 
             roi = table[
@@ -478,6 +475,8 @@ while running:
             else:
 
                 raw_targets.append((cx, cy))
+
+            # الكرة تحت الماوس
 
             if distance((mx, my), (cx, cy)) < r:
 
@@ -538,16 +537,16 @@ while running:
     smooth_targets = new_targets
 
     # =========================
-    # قفل الكرة
+    # قفل الكرة بـ Z
     # =========================
 
-    if keys[pygame.K_z]:
+    if keyboard.is_pressed("z"):
 
         current_time = time.time()
 
         if current_time - last_lock_time > 0.25:
 
-            if hovered_ball and smooth_targets:
+            if hovered_ball and len(smooth_targets) > 0:
 
                 locked_ball = min(
                     smooth_targets,
@@ -559,32 +558,37 @@ while running:
 
                 last_lock_time = current_time
 
-    if keys[pygame.K_x]:
+    # =========================
+    # إزالة القفل
+    # =========================
+
+    if keyboard.is_pressed("x"):
+
         locked_ball = None
 
     # =========================
     # اختيار الجيب
     # =========================
 
-    if keys[pygame.K_1]:
+    if keyboard.is_pressed("1"):
         selected_pocket = 0
 
-    elif keys[pygame.K_2]:
+    elif keyboard.is_pressed("2"):
         selected_pocket = 1
 
-    elif keys[pygame.K_3]:
+    elif keyboard.is_pressed("3"):
         selected_pocket = 2
 
-    elif keys[pygame.K_4]:
+    elif keyboard.is_pressed("4"):
         selected_pocket = 3
 
-    elif keys[pygame.K_5]:
+    elif keyboard.is_pressed("5"):
         selected_pocket = 4
 
-    elif keys[pygame.K_6]:
+    elif keyboard.is_pressed("6"):
         selected_pocket = 5
 
-    elif keys[pygame.K_0]:
+    elif keyboard.is_pressed("0"):
         selected_pocket = None
 
     # =========================
@@ -633,9 +637,7 @@ while running:
             int(locked_ball[1])
         )
 
-        # =========================
-        # خطوط التصويب
-        # =========================
+        # خط الضربة
 
         pygame.draw.aaline(
             screen,
@@ -643,6 +645,8 @@ while running:
             white_pos,
             ghost_pos
         )
+
+        # خط الجيب
 
         pygame.draw.aaline(
             screen,
@@ -661,9 +665,7 @@ while running:
             BALL_RADIUS
         )
 
-        # =========================
         # خط الانعكاس
-        # =========================
 
         dx = lock_pos[0] - ghost_pos[0]
         dy = lock_pos[1] - ghost_pos[1]
@@ -681,6 +683,10 @@ while running:
                 lock_pos,
                 (int(rx), int(ry))
             )
+
+    # =========================
+    # النص
+    # =========================
 
     screen.blit(
         cached_text,
