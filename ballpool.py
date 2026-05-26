@@ -19,13 +19,21 @@ cv2.setUseOptimized(True)
 cv2.setNumThreads(0)
 
 # =========================
-# إعدادات
+# إعدادات محسنة
 # =========================
 
-FPS = 144
+FPS = 240
+
 BALL_RADIUS = 16
-SMOOTHING = 0.60
-INNER_OFFSET = BALL_RADIUS + 10
+
+# ثبات أعلى
+SMOOTHING = 0.18
+
+# مربع الباند يدخل أكثر
+INNER_OFFSET = 38
+
+# منع القفز
+MAX_BALL_JUMP = 50
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
 SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
@@ -71,6 +79,10 @@ def smooth(current, previous, alpha=SMOOTHING):
 
     if previous is None:
         return current
+
+    # منع القفز
+    if distance(current, previous) > MAX_BALL_JUMP:
+        return previous
 
     return (
         previous[0] + (current[0] - previous[0]) * alpha,
@@ -129,6 +141,10 @@ def detect_table(frame):
 
     return None
 
+# =========================
+# كشف الكرة البيضاء
+# =========================
+
 def is_white_ball(roi):
 
     if roi is None or roi.size == 0:
@@ -139,8 +155,8 @@ def is_white_ball(roi):
         cv2.COLOR_BGR2HSV
     )
 
-    lower = np.array([0, 0, 185])
-    upper = np.array([180, 45, 255])
+    lower = np.array([0, 0, 190])
+    upper = np.array([180, 40, 255])
 
     mask = cv2.inRange(
         hsv,
@@ -156,18 +172,18 @@ def is_white_ball(roi):
     g = mean_bgr[1]
     r = mean_bgr[2]
 
-    color_balance = (
-        abs(r - g) < 18 and
-        abs(r - b) < 18 and
-        abs(g - b) < 18
+    balance = (
+        abs(r - g) < 15 and
+        abs(r - b) < 15 and
+        abs(g - b) < 15
     )
 
     brightness = (r + g + b) / 3
 
     return (
-        white_ratio > 0.58
-        and color_balance
-        and brightness > 170
+        white_ratio > 0.62
+        and balance
+        and brightness > 180
     )
 
 def ghost_ball(target, pocket, radius):
@@ -222,7 +238,7 @@ cached_text = font.render(
 )
 
 # =========================
-# إعداد Overlay
+# Overlay
 # =========================
 
 styles = win32gui.GetWindowLong(
@@ -256,8 +272,9 @@ camera = dxcam.create(
 )
 
 camera.start(
-    target_fps=FPS,
-    video_mode=True
+    target_fps=240,
+    video_mode=True,
+    region=(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
 )
 
 clock = pygame.time.Clock()
@@ -271,6 +288,8 @@ running = True
 while running:
 
     clock.tick(FPS)
+
+    pygame.event.pump()
 
     for event in pygame.event.get():
 
@@ -322,7 +341,7 @@ while running:
         continue
 
     # =========================
-    # حدود الباند الداخلية
+    # حدود الباند
     # =========================
 
     top_band = y + INNER_OFFSET
@@ -353,13 +372,17 @@ while running:
         5
     )
 
+    # =========================
+    # كشف الكرات
+    # =========================
+
     circles = cv2.HoughCircles(
         blur,
         cv2.HOUGH_GRADIENT,
-        dp=1.15,
-        minDist=20,
-        param1=65,
-        param2=20,
+        dp=1.1,
+        minDist=22,
+        param1=70,
+        param2=22,
         minRadius=6,
         maxRadius=17
     )
@@ -388,7 +411,7 @@ while running:
     screen.fill(TRANSPARENT)
 
     # =========================
-    # رسم مربع الباند
+    # مربع الباند
     # =========================
 
     pygame.draw.rect(
@@ -431,7 +454,7 @@ while running:
         )
 
     # =========================
-    # اكتشاف الكرات
+    # معالجة الكرات
     # =========================
 
     if circles is not None:
@@ -447,8 +470,6 @@ while running:
             r = int(r * 2)
 
             ignore = False
-
-            # تجاهل الجيوب
 
             for p in pockets:
 
@@ -638,26 +659,32 @@ while running:
         # خط الضربة
         # =========================
 
-        pygame.draw.aaline(
+        pygame.draw.line(
             screen,
             WHITE,
             white_pos,
-            ghost_pos
+            ghost_pos,
+            2
         )
 
         # =========================
         # خط الجيب
         # =========================
 
-        pygame.draw.aaline(
+        pygame.draw.line(
             screen,
             YELLOW,
             lock_pos,
             (
                 int(target_pocket[0]),
                 int(target_pocket[1])
-            )
+            ),
+            2
         )
+
+        # =========================
+        # الكرة الوهمية
+        # =========================
 
         aa_circle(
             screen,
@@ -680,228 +707,13 @@ while running:
             rx = lock_pos[0] + (dx / dist) * 300
             ry = lock_pos[1] + (dy / dist) * 300
 
-            pygame.draw.aaline(
+            pygame.draw.line(
                 screen,
                 PINK,
                 lock_pos,
-                (int(rx), int(ry))
+                (int(rx), int(ry)),
+                2
             )
-
-        # =========================
-        # الباند العلوي I
-        # =========================
-
-        if keyboard.is_pressed("i"):
-
-            mirrored_pocket = (
-                target_pocket[0],
-                top_band - (
-                    target_pocket[1] - top_band
-                )
-            )
-
-            dx2 = mirrored_pocket[0] - lock_pos[0]
-            dy2 = mirrored_pocket[1] - lock_pos[1]
-
-            if dy2 != 0:
-
-                t = (
-                    top_band - lock_pos[1]
-                ) / dy2
-
-                hit_x = lock_pos[0] + dx2 * t
-                hit_y = top_band
-
-                hit_x = max(
-                    left_band,
-                    min(right_band, hit_x)
-                )
-
-                pygame.draw.circle(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    8
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    lock_pos,
-                    (int(hit_x), int(hit_y))
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    (
-                        int(target_pocket[0]),
-                        int(target_pocket[1])
-                    )
-                )
-
-        # =========================
-        # الباند السفلي M
-        # =========================
-
-        if keyboard.is_pressed("m"):
-
-            mirrored_pocket = (
-                target_pocket[0],
-                bottom_band + (
-                    bottom_band - target_pocket[1]
-                )
-            )
-
-            dx2 = mirrored_pocket[0] - lock_pos[0]
-            dy2 = mirrored_pocket[1] - lock_pos[1]
-
-            if dy2 != 0:
-
-                t = (
-                    bottom_band - lock_pos[1]
-                ) / dy2
-
-                hit_x = lock_pos[0] + dx2 * t
-                hit_y = bottom_band
-
-                hit_x = max(
-                    left_band,
-                    min(right_band, hit_x)
-                )
-
-                pygame.draw.circle(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    8
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    lock_pos,
-                    (int(hit_x), int(hit_y))
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    (
-                        int(target_pocket[0]),
-                        int(target_pocket[1])
-                    )
-                )
-
-        # =========================
-        # الباند الشمال J
-        # =========================
-
-        if keyboard.is_pressed("j"):
-
-            mirrored_pocket = (
-                left_band - (
-                    target_pocket[0] - left_band
-                ),
-                target_pocket[1]
-            )
-
-            dx2 = mirrored_pocket[0] - lock_pos[0]
-            dy2 = mirrored_pocket[1] - lock_pos[1]
-
-            if dx2 != 0:
-
-                t = (
-                    left_band - lock_pos[0]
-                ) / dx2
-
-                hit_x = left_band
-                hit_y = lock_pos[1] + dy2 * t
-
-                hit_y = max(
-                    top_band,
-                    min(bottom_band, hit_y)
-                )
-
-                pygame.draw.circle(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    8
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    lock_pos,
-                    (int(hit_x), int(hit_y))
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    (
-                        int(target_pocket[0]),
-                        int(target_pocket[1])
-                    )
-                )
-
-        # =========================
-        # الباند اليمين K
-        # =========================
-
-        if keyboard.is_pressed("k"):
-
-            mirrored_pocket = (
-                right_band + (
-                    right_band - target_pocket[0]
-                ),
-                target_pocket[1]
-            )
-
-            dx2 = mirrored_pocket[0] - lock_pos[0]
-            dy2 = mirrored_pocket[1] - lock_pos[1]
-
-            if dx2 != 0:
-
-                t = (
-                    right_band - lock_pos[0]
-                ) / dx2
-
-                hit_x = right_band
-                hit_y = lock_pos[1] + dy2 * t
-
-                hit_y = max(
-                    top_band,
-                    min(bottom_band, hit_y)
-                )
-
-                pygame.draw.circle(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    8
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    lock_pos,
-                    (int(hit_x), int(hit_y))
-                )
-
-                pygame.draw.aaline(
-                    screen,
-                    BLUE,
-                    (int(hit_x), int(hit_y)),
-                    (
-                        int(target_pocket[0]),
-                        int(target_pocket[1])
-                    )
-                )
 
     # =========================
     # النص
