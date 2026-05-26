@@ -23,10 +23,10 @@ YELLOW = (255, 242, 0)
 ORANGE = (255, 127, 39)
 PINK = (255, 0, 128)
 
-# قائمة لتخزين الكرات المحددة بالترتيب (تسمح بتحديد كرتين أو أكثر)
+# قائمة لتخزين الكرات المحددة (تسمح بتحديد كرتين أو أكثر بالترتيب)
 locked_balls = []
 selected_pocket_index = None
-last_z_state = False # لمنع التحديد المتكرر عند ضغطة زر واحدة
+last_z_state = False  # لمنع التحديد المتكرر عند ضغطة زر واحدة مطولة
 
 def calculate_distance(p1, p2):
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
@@ -76,7 +76,7 @@ def main():
     font = pygame.font.SysFont("Arial", 18, bold=True)
     pocket_font = pygame.font.SysFont("Arial", 22, bold=True)
     
-    # نافذة مقاومة للوميض وثابتة تماماً بالاعتماد على كرت الشاشة
+    # الاعتماد على إعدادات شاشتك المانعة للرعشة والاهتزاز تماماً
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME | pygame.HWSURFACE | pygame.DOUBLEBUF)
     hwnd = pygame.display.get_wm_info()['window']
     
@@ -101,14 +101,14 @@ def main():
                 running = False
                 break
 
-            # أزرار اختيار الجيوب يدويًا
+            # قراءة أرقام الجيوب يدوياً
             for n in range(1, 7):
                 if keyboard.is_pressed(str(n)):
                     selected_pocket_index = n - 1
             if keyboard.is_pressed('0'):
                 selected_pocket_index = None
 
-            # زر X لتصفية الكرات المحددة وإعادة البدء
+            # زر X لمسح الكرات المحددة والبدء من جديد
             if keyboard.is_pressed('x'):
                 locked_balls.clear()
 
@@ -168,7 +168,7 @@ def main():
                         detected_radius = r
                         pygame.draw.circle(screen, WHITE, ball_center, r, 2)
                     else:
-                        # تلوين الكرات المحددة مسبقاً بلون أزرق لتميزها عن البقية
+                        # تمييز الكرات المحددة داخل المصفوفة باللون الأزرق
                         if ball_center in locked_balls:
                             pygame.draw.circle(screen, BLUE, ball_center, r, 2)
                         else:
@@ -178,28 +178,27 @@ def main():
                         hovered_ball = ball_center
                         pygame.draw.circle(screen, BLUE, ball_center, r + 4, 2)
 
-            # آلية التقاط الكرات المتعددة الذكية بدون تكرار عند الضغط المطول
+            # التقاط الكرات بالترتيب لمنع القفل المتكرر عند الضغطة الواحدة
             z_pressed = keyboard.is_pressed('z')
             if z_pressed and not last_z_state and hovered_ball is not None:
                 if hovered_ball not in locked_balls and hovered_ball != white_ball_center:
-                    # إضافة الكرة المحددة إلى قائمة الكرات المخططة
                     locked_balls.append(hovered_ball)
             last_z_state = z_pressed
 
-            # هندسة رسم المسارات المتسلسلة (Combo / Plant Shot)
+            # مسار الحسابات المزدوجة المتتالية (Combo Multi-Ball Mode)
             if len(locked_balls) > 0:
-                # 1. إيصال الخط الأبيض من الكرة البيضاء إلى الكرة الأولى المحددة
+                # 1. رسم الخط من الكرة البيضاء إلى مركز أول كرة قمت بتحديدها
                 if white_ball_center:
                     pygame.draw.line(screen, WHITE, white_ball_center, locked_balls[0], 2)
                     pygame.draw.circle(screen, WHITE, locked_balls[0], detected_radius + 2, 1)
 
-                # 2. رسم الخطوط بين الكرات المحددة المتتالية (من منتصف الكرة إلى منتصف الكرة الأخرى)
+                # 2. امتداد الخطوط من منتصف الكرة المحددة إلى منتصف الكرات المتتالية الأخرى
                 if len(locked_balls) > 1:
                     for idx in range(len(locked_balls) - 1):
                         pygame.draw.line(screen, BLUE, locked_balls[idx], locked_balls[idx+1], 2)
                         pygame.draw.circle(screen, BLUE, locked_balls[idx+1], detected_radius + 2, 1)
 
-                # 3. حساب المسار من الكرة الأخيرة إلى الجيب المستهدف
+                # 3. حساب المسار النهائي من آخر كرة تم تحديدها إلى البوكت المستهدف
                 last_ball = locked_balls[-1]
                 best_pocket = None
                 
@@ -214,16 +213,15 @@ def main():
                             best_pocket = pocket
 
                 if best_pocket:
-                    # حساب الـ Ghost Ball للكرة الأخيرة مع الجيب المختار
                     ghost_pos = get_ghost_ball_position(last_ball, best_pocket, detected_radius)
                     
-                    # خط المسار النهائي من الكرة الأخيرة المحددة نحو البوكت (أصفر)
+                    # الخط النهائي الممتد مباشرة إلى البوكت بالأصفر
                     pygame.draw.line(screen, YELLOW, last_ball, best_pocket, 3)
                     pygame.draw.circle(screen, YELLOW, last_ball, detected_radius, 2)
                     pygame.draw.circle(screen, YELLOW, ghost_pos, detected_radius, 1)
 
-                # عرض نص الإرشادات في الأعلى
-                info_text = f"Combo Mode: Locked {len(locked_balls)} Balls | Press 'X' to Reset Target"
+                # نص إرشادي في الأعلى لمعرفة عدد الكرات المقفلة حالياً
+                info_text = f"Billiards Combo Mode | Locked Balls: {len(locked_balls)} | Press 'X' to Reset"
                 text_surface = font.render(info_text, True, GREEN)
                 screen.blit(text_surface, (table["left"] + 10, table["top"] - 30 if table["top"] > 40 else 20))
 
