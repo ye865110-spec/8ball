@@ -25,6 +25,7 @@ cv2.setNumThreads(0)
 FPS = 144
 BALL_RADIUS = 16
 SMOOTHING = 0.60
+INNER_OFFSET = BALL_RADIUS + 10
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
 SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
@@ -38,7 +39,7 @@ GREEN = (0, 255, 0)
 BLUE = (0, 162, 232)
 PINK = (255, 0, 128)
 ORANGE = (255, 165, 0)
-CYAN = (0, 200, 255)
+CYAN = (0, 220, 255)
 
 # =========================
 # متغيرات
@@ -138,8 +139,8 @@ def is_white_ball(roi):
         cv2.COLOR_BGR2HSV
     )
 
-    lower = np.array([0, 0, 170])
-    upper = np.array([180, 70, 255])
+    lower = np.array([0, 0, 185])
+    upper = np.array([180, 45, 255])
 
     mask = cv2.inRange(
         hsv,
@@ -147,9 +148,27 @@ def is_white_ball(roi):
         upper
     )
 
-    ratio = np.sum(mask == 255) / mask.size
+    white_ratio = np.sum(mask == 255) / mask.size
 
-    return ratio > 0.42
+    mean_bgr = cv2.mean(roi)[:3]
+
+    b = mean_bgr[0]
+    g = mean_bgr[1]
+    r = mean_bgr[2]
+
+    color_balance = (
+        abs(r - g) < 18 and
+        abs(r - b) < 18 and
+        abs(g - b) < 18
+    )
+
+    brightness = (r + g + b) / 3
+
+    return (
+        white_ratio > 0.58
+        and color_balance
+        and brightness > 170
+    )
 
 def ghost_ball(target, pocket, radius):
 
@@ -278,6 +297,10 @@ while running:
     if frame is None:
         continue
 
+    # =========================
+    # اكتشاف الطاولة
+    # =========================
+
     if table_region is None:
 
         detected = detect_table(frame)
@@ -297,6 +320,19 @@ while running:
 
     if table.size == 0:
         continue
+
+    # =========================
+    # حدود الباند الداخلية
+    # =========================
+
+    top_band = y + INNER_OFFSET
+    left_band = x + INNER_OFFSET
+    right_band = x + w - INNER_OFFSET
+    bottom_band = y + h - INNER_OFFSET
+
+    # =========================
+    # تحسين الكشف
+    # =========================
 
     small = cv2.resize(
         table,
@@ -321,11 +357,11 @@ while running:
         blur,
         cv2.HOUGH_GRADIENT,
         dp=1.15,
-        minDist=22,
-        param1=60,
-        param2=18,
-        minRadius=7,
-        maxRadius=15
+        minDist=20,
+        param1=65,
+        param2=20,
+        minRadius=6,
+        maxRadius=17
     )
 
     raw_white = None
@@ -352,13 +388,8 @@ while running:
     screen.fill(TRANSPARENT)
 
     # =========================
-    # حدود الطاولة الداخلية
+    # رسم مربع الباند
     # =========================
-
-    top_band = y + BALL_RADIUS
-    left_band = x + BALL_RADIUS
-    right_band = x + w - BALL_RADIUS
-    bottom_band = y + h - BALL_RADIUS
 
     pygame.draw.rect(
         screen,
@@ -416,6 +447,8 @@ while running:
             r = int(r * 2)
 
             ignore = False
+
+            # تجاهل الجيوب
 
             for p in pockets:
 
@@ -522,6 +555,10 @@ while running:
 
                 last_lock_time = current_time
 
+    # =========================
+    # إزالة القفل
+    # =========================
+
     if keyboard.is_pressed("x"):
 
         locked_ball = None
@@ -597,12 +634,20 @@ while running:
             int(locked_ball[1])
         )
 
+        # =========================
+        # خط الضربة
+        # =========================
+
         pygame.draw.aaline(
             screen,
             WHITE,
             white_pos,
             ghost_pos
         )
+
+        # =========================
+        # خط الجيب
+        # =========================
 
         pygame.draw.aaline(
             screen,
@@ -620,6 +665,10 @@ while running:
             ghost_pos,
             BALL_RADIUS
         )
+
+        # =========================
+        # خط الانعكاس
+        # =========================
 
         dx = lock_pos[0] - ghost_pos[0]
         dy = lock_pos[1] - ghost_pos[1]
@@ -854,12 +903,20 @@ while running:
                     )
                 )
 
+    # =========================
+    # النص
+    # =========================
+
     screen.blit(
         cached_text,
         (x + 10, y - 30)
     )
 
     pygame.display.update()
+
+# =========================
+# إنهاء
+# =========================
 
 camera.stop()
 
