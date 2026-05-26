@@ -12,35 +12,35 @@ import time
 import keyboard
 
 # =========================
-# تحسين OpenCV
+# تحسينات OpenCV
 # =========================
 
 cv2.setUseOptimized(True)
 cv2.setNumThreads(0)
 
 # =========================
-# إعدادات عامة
+# إعدادات
 # =========================
+
+FPS = 144
+BALL_RADIUS = 16
+SMOOTHING = 0.60
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
 SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
 
-FPS = 144
-BALL_RADIUS = 16
-SMOOTHING = 0.55
-
 TRANSPARENT = (0, 0, 0)
 
 WHITE = (255, 255, 255)
-RED = (255, 0, 0)
 YELLOW = (255, 255, 0)
+RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 162, 232)
 PINK = (255, 0, 128)
 ORANGE = (255, 165, 0)
 
 # =========================
-# متغيرات عامة
+# متغيرات
 # =========================
 
 locked_ball = None
@@ -55,7 +55,7 @@ table_region = None
 last_lock_time = 0
 
 # =========================
-# أدوات مساعدة
+# أدوات
 # =========================
 
 def distance(p1, p2):
@@ -70,15 +70,9 @@ def smooth(current, previous, alpha=SMOOTHING):
     if previous is None:
         return current
 
-    dx = current[0] - previous[0]
-    dy = current[1] - previous[1]
-
-    if abs(dx) < 1 and abs(dy) < 1:
-        return previous
-
     return (
-        previous[0] + dx * alpha,
-        previous[1] + dy * alpha
+        previous[0] + (current[0] - previous[0]) * alpha,
+        previous[1] + (current[1] - previous[1]) * alpha
     )
 
 def aa_circle(surface, color, pos, radius):
@@ -91,25 +85,6 @@ def aa_circle(surface, color, pos, radius):
         color
     )
 
-def is_white_ball(roi):
-
-    if roi is None or roi.size == 0:
-        return False
-
-    hsv = cv2.cvtColor(
-        roi,
-        cv2.COLOR_BGR2HSV
-    )
-
-    lower = np.array([0, 0, 170])
-    upper = np.array([180, 70, 255])
-
-    mask = cv2.inRange(hsv, lower, upper)
-
-    ratio = np.sum(mask == 255) / mask.size
-
-    return ratio > 0.45
-
 def detect_table(frame):
 
     hsv = cv2.cvtColor(
@@ -117,10 +92,14 @@ def detect_table(frame):
         cv2.COLOR_BGR2HSV
     )
 
-    lower = np.array([35, 40, 40])
+    lower = np.array([30, 40, 40])
     upper = np.array([100, 255, 255])
 
-    mask = cv2.inRange(hsv, lower, upper)
+    mask = cv2.inRange(
+        hsv,
+        lower,
+        upper
+    )
 
     contours, _ = cv2.findContours(
         mask,
@@ -148,6 +127,29 @@ def detect_table(frame):
 
     return None
 
+def is_white_ball(roi):
+
+    if roi is None or roi.size == 0:
+        return False
+
+    hsv = cv2.cvtColor(
+        roi,
+        cv2.COLOR_BGR2HSV
+    )
+
+    lower = np.array([0, 0, 170])
+    upper = np.array([180, 70, 255])
+
+    mask = cv2.inRange(
+        hsv,
+        lower,
+        upper
+    )
+
+    ratio = np.sum(mask == 255) / mask.size
+
+    return ratio > 0.42
+
 def ghost_ball(target, pocket, radius):
 
     dx = target[0] - pocket[0]
@@ -173,7 +175,13 @@ pygame.init()
 pygame.font.init()
 
 pygame.mouse.set_visible(False)
-pygame.event.set_grab(False)
+
+screen = pygame.display.set_mode(
+    (SCREEN_WIDTH, SCREEN_HEIGHT),
+    pygame.NOFRAME
+)
+
+hwnd = pygame.display.get_wm_info()["window"]
 
 font = pygame.font.SysFont(
     "Arial",
@@ -193,20 +201,8 @@ cached_text = font.render(
     GREEN
 )
 
-screen = pygame.display.set_mode(
-    (SCREEN_WIDTH, SCREEN_HEIGHT),
-    pygame.NOFRAME
-)
-
-hwnd = pygame.display.get_wm_info()["window"]
-
-win32gui.ShowWindow(
-    hwnd,
-    win32con.SW_HIDE
-)
-
 # =========================
-# نافذة Overlay شفافة
+# إعداد Overlay
 # =========================
 
 styles = win32gui.GetWindowLong(
@@ -231,13 +227,8 @@ win32gui.SetLayeredWindowAttributes(
     win32con.LWA_COLORKEY
 )
 
-win32gui.ShowWindow(
-    hwnd,
-    win32con.SW_SHOW
-)
-
 # =========================
-# تشغيل dxcam
+# dxcam
 # =========================
 
 camera = dxcam.create(
@@ -252,7 +243,7 @@ camera.start(
 clock = pygame.time.Clock()
 
 # =========================
-# الحلقة الرئيسية
+# Main Loop
 # =========================
 
 running = True
@@ -274,7 +265,7 @@ while running:
         running = False
 
     # =========================
-    # إبقاء Overlay فوق اللعبة
+    # تثبيت Overlay
     # =========================
 
     win32gui.SetWindowPos(
@@ -323,7 +314,7 @@ while running:
         continue
 
     # =========================
-    # تصغير لتسريع المعالجة
+    # تحسين الكشف
     # =========================
 
     small = cv2.resize(
@@ -333,39 +324,16 @@ while running:
         fy=0.5
     )
 
-    hsv = cv2.cvtColor(
-        small,
-        cv2.COLOR_BGR2HSV
-    )
-
-    # إزالة لون الطاولة
-
-    lower_table = np.array([80, 40, 40])
-    upper_table = np.array([120, 255, 255])
-
-    table_mask = cv2.inRange(
-        hsv,
-        lower_table,
-        upper_table
-    )
-
-    mask = cv2.bitwise_not(table_mask)
-
     gray = cv2.cvtColor(
         small,
         cv2.COLOR_BGR2GRAY
     )
 
-    gray = cv2.bitwise_and(
-        gray,
-        gray,
-        mask=mask
-    )
+    gray = cv2.equalizeHist(gray)
 
-    blur = cv2.GaussianBlur(
+    blur = cv2.medianBlur(
         gray,
-        (5, 5),
-        0
+        5
     )
 
     # =========================
@@ -375,18 +343,25 @@ while running:
     circles = cv2.HoughCircles(
         blur,
         cv2.HOUGH_GRADIENT,
-        dp=1.2,
-        minDist=28,
-        param1=50,
-        param2=30,
-        minRadius=8,
-        maxRadius=12
+        dp=1.15,
+        minDist=22,
+        param1=60,
+        param2=18,
+        minRadius=7,
+        maxRadius=15
     )
 
     raw_white = None
     raw_targets = []
 
-    mx, my = win32api.GetCursorPos()
+    # =========================
+    # الماوس
+    # =========================
+
+    try:
+        mx, my = win32api.GetCursorPos()
+    except:
+        mx, my = (0, 0)
 
     hovered_ball = None
 
@@ -435,7 +410,7 @@ while running:
         )
 
     # =========================
-    # معالجة الكرات
+    # معالجة الدوائر
     # =========================
 
     if circles is not None:
@@ -476,9 +451,9 @@ while running:
 
                 raw_targets.append((cx, cy))
 
-            # الكرة تحت الماوس
+            # تحديد الكرة بالماوس
 
-            if distance((mx, my), (cx, cy)) < r:
+            if distance((mx, my), (cx, cy)) < r + 8:
 
                 hovered_ball = (cx, cy)
 
@@ -516,7 +491,10 @@ while running:
                 nearest = old
                 break
 
-        sb = smooth(b, nearest)
+        sb = smooth(
+            b,
+            nearest
+        )
 
         new_targets.append(sb)
 
@@ -592,7 +570,7 @@ while running:
         selected_pocket = None
 
     # =========================
-    # نظام التصويب
+    # التصويب
     # =========================
 
     if smooth_white and locked_ball:
@@ -657,6 +635,8 @@ while running:
                 int(target_pocket[1])
             )
         )
+
+        # الكرة الوهمية
 
         aa_circle(
             screen,
