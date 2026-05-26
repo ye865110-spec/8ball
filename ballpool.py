@@ -425,8 +425,6 @@ while running:
             cy = int(cy * 2 + y)
             r = int(r * 2)
 
-            # تجاهل الجيوب
-
             ignore = False
 
             for p in pockets:
@@ -450,8 +448,6 @@ while running:
             else:
 
                 raw_targets.append((cx, cy))
-
-            # تحديد الكرة بالماوس
 
             if distance((mx, my), (cx, cy)) < r + 8:
 
@@ -663,6 +659,49 @@ while running:
                 lock_pos,
                 (int(rx), int(ry))
             )
+
+        # =========================
+        # نظام الباند العلوي
+        # H
+        # =========================
+
+        if keyboard.is_pressed("h"):
+
+            mirror_y = -target_pocket[1]
+
+            dx2 = target_pocket[0] - lock_pos[0]
+            dy2 = mirror_y - lock_pos[1]
+
+            if dy2 != 0:
+
+                t = (0 - lock_pos[1]) / dy2
+
+                hit_x = lock_pos[0] + dx2 * t
+                hit_y = 0
+
+                pygame.draw.circle(
+                    screen,
+                    BLUE,
+                    (int(hit_x), int(hit_y)),
+                    8
+                )
+
+                pygame.draw.aaline(
+                    screen,
+                    BLUE,
+                    lock_pos,
+                    (int(hit_x), int(hit_y))
+                )
+
+                pygame.draw.aaline(
+                    screen,
+                    BLUE,
+                    (int(hit_x), int(hit_y)),
+                    (
+                        int(target_pocket[0]),
+                        int(target_pocket[1])
+                    )
+                )
 
     # =========================
     # النص
