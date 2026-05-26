@@ -21,12 +21,9 @@ GREEN = (0, 255, 0)
 BLUE = (0, 162, 232)
 YELLOW = (255, 242, 0)
 ORANGE = (255, 127, 39)
-PINK = (255, 0, 128)
 
-# قائمة لتخزين الكرات المحددة (تسمح بتحديد كرتين أو أكثر بالترتيب)
-locked_balls = []
+locked_ball_center = None
 selected_pocket_index = None
-last_z_state = False  # لمنع التحديد المتكرر عند ضغطة زر واحدة مطولة
 
 def calculate_distance(p1, p2):
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
@@ -52,6 +49,58 @@ def get_ghost_ball_position(target_ball, pocket, ball_radius):
     ghost_y = pocket[1] + dy * ratio
     return (int(ghost_x), int(ghost_y))
 
+def calculate_ray_cast_with_bounces(start_pos, direction_vector, table_bounds, max_bounces=3):
+    """حساب مسار الأشعة المتعرج عند الاصطدام بجدران الطاولة (Bank Shots)"""
+    points = [start_pos]
+    curr_pos = list(start_pos)
+    curr_dir = list(direction_vector)
+    
+    # تحديد حدود الطاولة الفعلية للارتداد
+    t_top = table_bounds["top"] + 35
+    t_bottom = table_bounds["top"] + table_bounds["height"] - 35
+    t_left = table_bounds["left"] + 35
+    t_right = table_bounds["left"] + table_bounds["width"] - 35
+    
+    for _ in range(max_bounces):
+        if curr_dir[0] == 0 and curr_dir[1] == 0:
+            break
+            
+        # حساب المسافات المتبقية للجدران الأربعة بناءً على اتجاه الحركة
+        times = []
+        
+        if curr_dir[0] > 0: # الجدار الأيمن
+            times.append((t_right - curr_pos[0]) / curr_dir[0])
+        elif curr_dir[0] < 0: # الجدار الأيسر
+            times.append((t_left - curr_pos[0]) / curr_dir[0])
+            
+        if curr_dir[1] > 0: # الجدار السفلي
+            times.append((t_bottom - curr_pos[1]) / curr_dir[1])
+        elif curr_dir[1] < 0: # الجدار العلوي
+            times.append((t_top - curr_pos[1]) / curr_dir[1])
+            
+        valid_times = [t for t in times if t > 0.001]
+        if not valid_times:
+            # امتداد افتراضي طويل جداً إذا لم يتقاطع مع جدار قريب
+            curr_pos[0] += curr_dir[0] * 500
+            curr_pos[1] += curr_dir[1] * 500
+            points.append((int(curr_pos[0]), int(curr_pos[1])))
+            break
+            
+        min_t = min(valid_times)
+        
+        # تحديث النقطة القادمة للاصطدام
+        curr_pos[0] += curr_dir[0] * min_t
+        curr_pos[1] += curr_dir[1] * min_t
+        points.append((int(curr_pos[0]), int(curr_pos[1])))
+        
+        # عكس الاتجاه فيزيائياً بناءً على الجدار المصطدم به
+        if abs(curr_pos[0] - t_right) < 2 or abs(curr_pos[0] - t_left) < 2:
+            curr_dir[0] = -curr_dir[0] # ارتداد أفقي
+        if abs(curr_pos[1] - t_bottom) < 2 or abs(curr_pos[1] - t_top) < 2:
+            curr_dir[1] = -curr_dir[1] # ارتداد رأسي
+            
+    return points
+
 def detect_table_bounds(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     lower_table = np.array([35, 40, 40])
@@ -69,14 +118,13 @@ def detect_table_bounds(frame):
     return {"top": 0, "left": 0, "width": SCREEN_WIDTH, "height": SCREEN_HEIGHT}
 
 def main():
-    global locked_balls, selected_pocket_index, last_z_state
+    global locked_ball_center, selected_pocket_index
     
     pygame.init()
     pygame.font.init()
     font = pygame.font.SysFont("Arial", 18, bold=True)
     pocket_font = pygame.font.SysFont("Arial", 22, bold=True)
     
-    # الاعتماد على إعدادات شاشتك المانعة للرعشة والاهتزاز تماماً
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME | pygame.HWSURFACE | pygame.DOUBLEBUF)
     hwnd = pygame.display.get_wm_info()['window']
     
@@ -101,16 +149,15 @@ def main():
                 running = False
                 break
 
-            # قراءة أرقام الجيوب يدوياً
             for n in range(1, 7):
                 if keyboard.is_pressed(str(n)):
                     selected_pocket_index = n - 1
             if keyboard.is_pressed('0'):
                 selected_pocket_index = None
-
-            # زر X لمسح الكرات المحددة والبدء من جديد
+                
+            # زر X لتفريغ القفل والبدء من جديد
             if keyboard.is_pressed('x'):
-                locked_balls.clear()
+                locked_ball_center = None
 
             screen.fill(TRANSPARENT_COLOR)
             mx, my = win32api.GetCursorPos()
@@ -128,8 +175,8 @@ def main():
             filtered = cv2.bilateralFilter(gray, 9, 75, 75)
             
             circles = cv2.HoughCircles(
-                filtered, cv2.HOUGH_GRADIENT, dp=1, minDist=25,
-                param1=50, param2=32, minRadius=12, maxRadius=24
+                filtered, cv2.HOUGH_GRADIENT, dp=1, minDist=30,
+                param1=50, param2=30, minRadius=13, maxRadius=23
             )
 
             pockets = [
@@ -141,7 +188,7 @@ def main():
                 (table["left"] + table["width"] - 25, table["top"] + table["height"] - 25)
             ]
 
-            # رسم الجيوب وترقيمها
+            # رسم الجيوب الستة
             for idx, pocket in enumerate(pockets):
                 pygame.draw.circle(screen, RED, pocket, 15, 2)
                 p_text = pocket_font.render(str(idx + 1), True, ORANGE)
@@ -159,6 +206,10 @@ def main():
                     r = int(i[2])
                     ball_center = (cx, cy)
 
+                    # منع التقاط أي دوائر وهمية تقع خارج نطاق حدود اللعبة المصممة
+                    if not (table["left"] < cx < table["left"] + table["width"] and table["top"] < cy < table["top"] + table["height"]):
+                        continue
+
                     y1, y2 = max(0, int(i[1])-r), min(table["height"], int(i[1])+r)
                     x1, x2 = max(0, int(i[0])-r), min(table["width"], int(i[0])+r)
                     ball_roi = table_frame[y1:y2, x1:x2]
@@ -168,8 +219,7 @@ def main():
                         detected_radius = r
                         pygame.draw.circle(screen, WHITE, ball_center, r, 2)
                     else:
-                        # تمييز الكرات المحددة داخل المصفوفة باللون الأزرق
-                        if ball_center in locked_balls:
+                        if locked_ball_center and calculate_distance(ball_center, locked_ball_center) < 5:
                             pygame.draw.circle(screen, BLUE, ball_center, r, 2)
                         else:
                             pygame.draw.circle(screen, YELLOW, ball_center, r, 1)
@@ -178,52 +228,51 @@ def main():
                         hovered_ball = ball_center
                         pygame.draw.circle(screen, BLUE, ball_center, r + 4, 2)
 
-            # التقاط الكرات بالترتيب لمنع القفل المتكرر عند الضغطة الواحدة
-            z_pressed = keyboard.is_pressed('z')
-            if z_pressed and not last_z_state and hovered_ball is not None:
-                if hovered_ball not in locked_balls and hovered_ball != white_ball_center:
-                    locked_balls.append(hovered_ball)
-            last_z_state = z_pressed
+            # تفعيل قفل كرة واحدة فقط عند ضغط Z
+            if keyboard.is_pressed('z') and hovered_ball is not None:
+                if white_ball_center and hovered_ball != white_ball_center:
+                    locked_ball_center = hovered_ball
 
-            # مسار الحسابات المزدوجة المتتالية (Combo Multi-Ball Mode)
-            if len(locked_balls) > 0:
-                # 1. رسم الخط من الكرة البيضاء إلى مركز أول كرة قمت بتحديدها
-                if white_ball_center:
-                    pygame.draw.line(screen, WHITE, white_ball_center, locked_balls[0], 2)
-                    pygame.draw.circle(screen, WHITE, locked_balls[0], detected_radius + 2, 1)
-
-                # 2. امتداد الخطوط من منتصف الكرة المحددة إلى منتصف الكرات المتتالية الأخرى
-                if len(locked_balls) > 1:
-                    for idx in range(len(locked_balls) - 1):
-                        pygame.draw.line(screen, BLUE, locked_balls[idx], locked_balls[idx+1], 2)
-                        pygame.draw.circle(screen, BLUE, locked_balls[idx+1], detected_radius + 2, 1)
-
-                # 3. حساب المسار النهائي من آخر كرة تم تحديدها إلى البوكت المستهدف
-                last_ball = locked_balls[-1]
+            # تتبع المسار وحساب الارتدادات المتعرجة
+            if locked_ball_center:
                 best_pocket = None
-                
                 if selected_pocket_index is not None and selected_pocket_index < len(pockets):
                     best_pocket = pockets[selected_pocket_index]
                 else:
                     min_distance = float('inf')
                     for pocket in pockets:
-                        dist = calculate_distance(last_ball, pocket)
+                        dist = calculate_distance(locked_ball_center, pocket)
                         if dist < min_distance:
                             min_distance = dist
                             best_pocket = pocket
 
                 if best_pocket:
-                    ghost_pos = get_ghost_ball_position(last_ball, best_pocket, detected_radius)
+                    ghost_pos = get_ghost_ball_position(locked_ball_center, best_pocket, detected_radius)
                     
-                    # الخط النهائي الممتد مباشرة إلى البوكت بالأصفر
-                    pygame.draw.line(screen, YELLOW, last_ball, best_pocket, 3)
-                    pygame.draw.circle(screen, YELLOW, last_ball, detected_radius, 2)
+                    # حساب خط الكرة المستهدفة الممتد للبوكت
+                    pygame.draw.line(screen, YELLOW, locked_ball_center, best_pocket, 3)
                     pygame.draw.circle(screen, YELLOW, ghost_pos, detected_radius, 1)
 
-                # نص إرشادي في الأعلى لمعرفة عدد الكرات المقفلة حالياً
-                info_text = f"Billiards Combo Mode | Locked Balls: {len(locked_balls)} | Press 'X' to Reset"
-                text_surface = font.render(info_text, True, GREEN)
-                screen.blit(text_surface, (table["left"] + 10, table["top"] - 30 if table["top"] > 40 else 20))
+                    if white_ball_center:
+                        # الحصول على متجهات الحركة البدئية
+                        dx = ghost_pos[0] - white_ball_center[0]
+                        dy = ghost_pos[1] - white_ball_center[1]
+                        
+                        # استدعاء دالة رسم الارتدادات المتقدمة (ترسم المسار متعرجاً عند الجدران)
+                        bounce_points = calculate_ray_cast_with_bounces(white_ball_center, [dx, dy], table, max_bounces=4)
+                        
+                        # رسم خطوط المسار الارتدادي بالكامل للكرة البيضاء
+                        for idx in range(len(bounce_points) - 1):
+                            # تبديل الألوان لإعطاء مظهر احترافي ومحاكي دقيق للصورة المستهدفة
+                            color = WHITE if idx == 0 else GREEN
+                            pygame.draw.line(screen, color, bounce_points[idx], bounce_points[idx+1], 2)
+                            if idx > 0:
+                                pygame.draw.circle(screen, RED, bounce_points[idx], 5, 1) # نقطة التصادم بالجدار
+
+                    # نص الحالة العلوي
+                    info_text = f"Esports AI Tool | Raycast Bounce Mode Active | Press 'X' to Unlock"
+                    text_surface = font.render(info_text, True, GREEN)
+                    screen.blit(text_surface, (table["left"] + 10, table["top"] - 30 if table["top"] > 40 else 20))
 
             pygame.display.flip()
             clock.tick(60)
