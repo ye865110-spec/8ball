@@ -38,6 +38,7 @@ GREEN = (0, 255, 0)
 BLUE = (0, 162, 232)
 PINK = (255, 0, 128)
 ORANGE = (255, 165, 0)
+CYAN = (0, 200, 255)
 
 # =========================
 # متغيرات
@@ -257,16 +258,8 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-    # =========================
-    # خروج
-    # =========================
-
     if keyboard.is_pressed("ctrl+q"):
         running = False
-
-    # =========================
-    # تثبيت Overlay
-    # =========================
 
     win32gui.SetWindowPos(
         hwnd,
@@ -280,18 +273,10 @@ while running:
         | win32con.SWP_NOACTIVATE
     )
 
-    # =========================
-    # التقاط الشاشة
-    # =========================
-
     frame = camera.get_latest_frame()
 
     if frame is None:
         continue
-
-    # =========================
-    # اكتشاف الطاولة
-    # =========================
 
     if table_region is None:
 
@@ -313,10 +298,6 @@ while running:
     if table.size == 0:
         continue
 
-    # =========================
-    # تحسين الكشف
-    # =========================
-
     small = cv2.resize(
         table,
         None,
@@ -336,10 +317,6 @@ while running:
         5
     )
 
-    # =========================
-    # اكتشاف الكرات
-    # =========================
-
     circles = cv2.HoughCircles(
         blur,
         cv2.HOUGH_GRADIENT,
@@ -354,20 +331,12 @@ while running:
     raw_white = None
     raw_targets = []
 
-    # =========================
-    # الماوس
-    # =========================
-
     try:
         mx, my = win32api.GetCursorPos()
     except:
         mx, my = (0, 0)
 
     hovered_ball = None
-
-    # =========================
-    # الجيوب
-    # =========================
 
     pockets = [
 
@@ -381,6 +350,27 @@ while running:
     ]
 
     screen.fill(TRANSPARENT)
+
+    # =========================
+    # حدود الطاولة الداخلية
+    # =========================
+
+    top_band = y + BALL_RADIUS
+    left_band = x + BALL_RADIUS
+    right_band = x + w - BALL_RADIUS
+    bottom_band = y + h - BALL_RADIUS
+
+    pygame.draw.rect(
+        screen,
+        CYAN,
+        (
+            left_band,
+            top_band,
+            right_band - left_band,
+            bottom_band - top_band
+        ),
+        2
+    )
 
     # =========================
     # رسم الجيوب
@@ -511,7 +501,7 @@ while running:
     smooth_targets = new_targets
 
     # =========================
-    # قفل الكرة بـ Z
+    # قفل الكرة
     # =========================
 
     if keyboard.is_pressed("z"):
@@ -531,10 +521,6 @@ while running:
                 )
 
                 last_lock_time = current_time
-
-    # =========================
-    # إزالة القفل
-    # =========================
 
     if keyboard.is_pressed("x"):
 
@@ -611,16 +597,12 @@ while running:
             int(locked_ball[1])
         )
 
-        # خط الضربة
-
         pygame.draw.aaline(
             screen,
             WHITE,
             white_pos,
             ghost_pos
         )
-
-        # خط الجيب
 
         pygame.draw.aaline(
             screen,
@@ -632,16 +614,12 @@ while running:
             )
         )
 
-        # الكرة الوهمية
-
         aa_circle(
             screen,
             WHITE,
             ghost_pos,
             BALL_RADIUS
         )
-
-        # خط الانعكاس
 
         dx = lock_pos[0] - ghost_pos[0]
         dy = lock_pos[1] - ghost_pos[1]
@@ -667,17 +645,29 @@ while running:
 
         if keyboard.is_pressed("h"):
 
-            mirror_y = -target_pocket[1]
+            mirrored_pocket = (
+                target_pocket[0],
+                top_band - (
+                    target_pocket[1] - top_band
+                )
+            )
 
-            dx2 = target_pocket[0] - lock_pos[0]
-            dy2 = mirror_y - lock_pos[1]
+            dx2 = mirrored_pocket[0] - lock_pos[0]
+            dy2 = mirrored_pocket[1] - lock_pos[1]
 
             if dy2 != 0:
 
-                t = (0 - lock_pos[1]) / dy2
+                t = (
+                    top_band - lock_pos[1]
+                ) / dy2
 
                 hit_x = lock_pos[0] + dx2 * t
-                hit_y = 0
+                hit_y = top_band
+
+                hit_x = max(
+                    left_band,
+                    min(right_band, hit_x)
+                )
 
                 pygame.draw.circle(
                     screen,
@@ -703,20 +693,12 @@ while running:
                     )
                 )
 
-    # =========================
-    # النص
-    # =========================
-
     screen.blit(
         cached_text,
         (x + 10, y - 30)
     )
 
     pygame.display.update()
-
-# =========================
-# إنهاء
-# =========================
 
 camera.stop()
 
