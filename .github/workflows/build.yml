@@ -2,50 +2,41 @@ name: Build Billiards Tool to EXE
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches:
+      - main
+      - master
+
   pull_request:
-    branches: [ "main", "master" ]
+    branches:
+      - main
+      - master
 
 jobs:
   build:
+
     runs-on: windows-latest
 
     steps:
 
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install opencv-python numpy pygame pywin32 dxcam keyboard scipy filterpy pyinstaller
 
-        pip install ^
-        opencv-python ^
-        numpy ^
-        pygame ^
-        pywin32 ^
-        dxcam ^
-        keyboard ^
-        scipy ^
-        filterpy ^
-        pyinstaller
+      - name: Build EXE
+        run: |
+          pyinstaller --onefile --noconsole --clean ballpool.py
 
-    - name: Build EXE
-      run: |
-        pyinstaller ^
-        --onefile ^
-        --noconsole ^
-        --clean ^
-        --disable-windowed-traceback ^
-        ballpool.py
-
-    - name: Upload Result
-      uses: actions/upload-artifact@v4
-      with:
-        name: Billiards-Combo-Overlay
-        path: dist/ballpool.exe
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Billiards-Overlay
+          path: dist/ballpool.exe
