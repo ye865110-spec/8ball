@@ -1,8 +1,0 @@
-numpy
-opencv-python
-pygame
-pywin32
-keyboard
-mss
-dxcam
-pyinstaller
