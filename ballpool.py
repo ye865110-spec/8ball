@@ -1,4 +1,5 @@
 import pygame
+import pygame.gfxdraw
 import win32gui
 import win32con
 import win32api
@@ -8,6 +9,13 @@ import numpy as np
 import math
 import sys
 import time
+
+# =========================
+# تحسينات OpenCV
+# =========================
+
+cv2.setUseOptimized(True)
+cv2.setNumThreads(0)
 
 # =========================
 # إعدادات عامة
@@ -21,6 +29,7 @@ BALL_RADIUS = 16
 SMOOTHING = 0.55
 
 TRANSPARENT = (0, 0, 0)
+
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 YELLOW = (255, 255, 0)
@@ -30,7 +39,7 @@ PINK = (255, 0, 128)
 ORANGE = (255, 165, 0)
 
 # =========================
-# متغيرات عامة
+# متغيرات
 # =========================
 
 locked_ball = None
@@ -43,12 +52,17 @@ smooth_ghost = None
 
 table_region = None
 
+last_lock_time = 0
+
 # =========================
-# أدوات مساعدة
+# أدوات
 # =========================
 
 def distance(p1, p2):
-    return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+    return math.hypot(
+        p1[0] - p2[0],
+        p1[1] - p2[1]
+    )
 
 def smooth(current, previous, alpha=SMOOTHING):
 
@@ -66,15 +80,38 @@ def smooth(current, previous, alpha=SMOOTHING):
         previous[1] + dy * alpha
     )
 
+def aa_circle(surface, color, pos, radius, width=1):
+
+    pygame.gfxdraw.aacircle(
+        surface,
+        int(pos[0]),
+        int(pos[1]),
+        radius,
+        color
+    )
+
+    if width == 0:
+
+        pygame.gfxdraw.filled_circle(
+            surface,
+            int(pos[0]),
+            int(pos[1]),
+            radius,
+            color
+        )
+
 def is_white_ball(roi):
 
     if roi is None or roi.size == 0:
         return False
 
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(
+        roi,
+        cv2.COLOR_BGR2HSV
+    )
 
     lower = np.array([0, 0, 170])
-    upper = np.array([180, 60, 255])
+    upper = np.array([180, 70, 255])
 
     mask = cv2.inRange(hsv, lower, upper)
 
@@ -84,7 +121,10 @@ def is_white_ball(roi):
 
 def detect_table(frame):
 
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2HSV
+    )
 
     lower = np.array([35, 40, 40])
     upper = np.array([100, 255, 255])
@@ -99,7 +139,10 @@ def detect_table(frame):
 
     if contours:
 
-        largest = max(contours, key=cv2.contourArea)
+        largest = max(
+            contours,
+            key=cv2.contourArea
+        )
 
         if cv2.contourArea(largest) > 40000:
 
@@ -138,8 +181,20 @@ def ghost_ball(target, pocket, radius):
 pygame.init()
 pygame.font.init()
 
-font = pygame.font.SysFont("Arial", 18, bold=True)
-pocket_font = pygame.font.SysFont("Arial", 22, bold=True)
+pygame.mouse.set_visible(False)
+pygame.event.set_grab(False)
+
+font = pygame.font.SysFont(
+    "Arial",
+    18,
+    bold=True
+)
+
+pocket_font = pygame.font.SysFont(
+    "Arial",
+    22,
+    bold=True
+)
 
 cached_text = font.render(
     "Static AI Aim Assist",
@@ -149,16 +204,24 @@ cached_text = font.render(
 
 screen = pygame.display.set_mode(
     (SCREEN_WIDTH, SCREEN_HEIGHT),
-    pygame.NOFRAME | pygame.DOUBLEBUF
+    pygame.NOFRAME
 )
 
 hwnd = pygame.display.get_wm_info()["window"]
 
+win32gui.ShowWindow(
+    hwnd,
+    win32con.SW_HIDE
+)
+
 # =========================
-# إعداد نافذة شفافة
+# Overlay شفاف
 # =========================
 
-styles = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+styles = win32gui.GetWindowLong(
+    hwnd,
+    win32con.GWL_EXSTYLE
+)
 
 win32gui.SetWindowLong(
     hwnd,
@@ -167,6 +230,7 @@ win32gui.SetWindowLong(
     | win32con.WS_EX_LAYERED
     | win32con.WS_EX_TRANSPARENT
     | win32con.WS_EX_TOPMOST
+    | win32con.WS_EX_NOACTIVATE
 )
 
 win32gui.SetLayeredWindowAttributes(
@@ -176,11 +240,18 @@ win32gui.SetLayeredWindowAttributes(
     win32con.LWA_COLORKEY
 )
 
+win32gui.ShowWindow(
+    hwnd,
+    win32con.SW_SHOW
+)
+
 # =========================
 # تشغيل dxcam
 # =========================
 
-camera = dxcam.create(output_color="BGR")
+camera = dxcam.create(
+    output_color="BGR"
+)
 
 camera.start(
     target_fps=FPS,
@@ -210,7 +281,7 @@ while running:
         running = False
 
     # =========================
-    # تثبيت النافذة دائماً فوق اللعبة
+    # إبقاء Overlay فوق اللعبة
     # =========================
 
     win32gui.SetWindowPos(
@@ -235,7 +306,7 @@ while running:
         continue
 
     # =========================
-    # اكتشاف الطاولة مرة واحدة فقط
+    # اكتشاف الطاولة مرة واحدة
     # =========================
 
     if table_region is None:
@@ -259,7 +330,7 @@ while running:
         continue
 
     # =========================
-    # تصغير الصورة لتسريع المعالجة
+    # تسريع المعالجة
     # =========================
 
     small = cv2.resize(
@@ -269,19 +340,50 @@ while running:
         fy=0.5
     )
 
-    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(
+        small,
+        cv2.COLOR_BGR2HSV
+    )
 
-    blur = cv2.GaussianBlur(gray, (7, 7), 0)
+    # إزالة لون الطاولة
+
+    lower_table = np.array([80, 40, 40])
+    upper_table = np.array([120, 255, 255])
+
+    table_mask = cv2.inRange(
+        hsv,
+        lower_table,
+        upper_table
+    )
+
+    mask = cv2.bitwise_not(table_mask)
+
+    gray = cv2.cvtColor(
+        small,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    gray = cv2.bitwise_and(
+        gray,
+        gray,
+        mask=mask
+    )
+
+    blur = cv2.GaussianBlur(
+        gray,
+        (5, 5),
+        0
+    )
 
     circles = cv2.HoughCircles(
         blur,
         cv2.HOUGH_GRADIENT,
         dp=1.2,
-        minDist=20,
+        minDist=28,
         param1=50,
-        param2=22,
-        minRadius=7,
-        maxRadius=13
+        param2=30,
+        minRadius=8,
+        maxRadius=12
     )
 
     raw_white = None
@@ -290,6 +392,10 @@ while running:
     mx, my = win32api.GetCursorPos()
 
     hovered_ball = None
+
+    # =========================
+    # الجيوب
+    # =========================
 
     pockets = [
 
@@ -310,12 +416,11 @@ while running:
 
     for idx, p in enumerate(pockets):
 
-        pygame.draw.circle(
+        aa_circle(
             screen,
             RED,
-            (int(p[0]), int(p[1])),
-            14,
-            2
+            p,
+            14
         )
 
         txt = pocket_font.render(
@@ -348,6 +453,19 @@ while running:
             cy = int(cy * 2 + y)
             r = int(r * 2)
 
+            # تجاهل الجيوب
+
+            too_close_to_pocket = False
+
+            for p in pockets:
+
+                if distance((cx, cy), p) < 35:
+                    too_close_to_pocket = True
+                    break
+
+            if too_close_to_pocket:
+                continue
+
             roi = table[
                 max(0, cy-y-r):min(h, cy-y+r),
                 max(0, cx-x-r):min(w, cx-x+r)
@@ -366,23 +484,25 @@ while running:
                 hovered_ball = (cx, cy)
 
     # =========================
-    # تنعيم الكرة البيضاء
+    # الكرة البيضاء
     # =========================
 
     if raw_white:
 
-        smooth_white = smooth(raw_white, smooth_white)
+        smooth_white = smooth(
+            raw_white,
+            smooth_white
+        )
 
-        pygame.draw.circle(
+        aa_circle(
             screen,
             WHITE,
-            (int(smooth_white[0]), int(smooth_white[1])),
-            BALL_RADIUS,
-            2
+            smooth_white,
+            BALL_RADIUS
         )
 
     # =========================
-    # تنعيم الكرات الأخرى
+    # الكرات الأخرى
     # =========================
 
     new_targets = []
@@ -408,12 +528,11 @@ while running:
             if distance(sb, locked_ball) < 10:
                 color = BLUE
 
-        pygame.draw.circle(
+        aa_circle(
             screen,
             color,
-            (int(sb[0]), int(sb[1])),
-            BALL_RADIUS,
-            2
+            sb,
+            BALL_RADIUS
         )
 
     smooth_targets = new_targets
@@ -424,14 +543,23 @@ while running:
 
     if keys[pygame.K_z]:
 
-        if hovered_ball:
+        current_time = time.time()
 
-            locked_ball = hovered_ball
+        if current_time - last_lock_time > 0.25:
 
-            time.sleep(0.15)
+            if hovered_ball and smooth_targets:
+
+                locked_ball = min(
+                    smooth_targets,
+                    key=lambda b: distance(
+                        b,
+                        hovered_ball
+                    )
+                )
+
+                last_lock_time = current_time
 
     if keys[pygame.K_x]:
-
         locked_ball = None
 
     # =========================
@@ -473,7 +601,10 @@ while running:
 
             target_pocket = min(
                 pockets,
-                key=lambda p: distance(locked_ball, p)
+                key=lambda p: distance(
+                    locked_ball,
+                    p
+                )
             )
 
         gp = ghost_ball(
@@ -482,7 +613,10 @@ while running:
             BALL_RADIUS
         )
 
-        smooth_ghost = smooth(gp, smooth_ghost)
+        smooth_ghost = smooth(
+            gp,
+            smooth_ghost
+        )
 
         white_pos = (
             int(smooth_white[0]),
@@ -500,7 +634,7 @@ while running:
         )
 
         # =========================
-        # خطوط ناعمة بدون رعشة
+        # خطوط التصويب
         # =========================
 
         pygame.draw.aaline(
@@ -520,12 +654,11 @@ while running:
             )
         )
 
-        pygame.draw.circle(
+        aa_circle(
             screen,
             WHITE,
             ghost_pos,
-            BALL_RADIUS,
-            1
+            BALL_RADIUS
         )
 
         # =========================
@@ -549,12 +682,19 @@ while running:
                 (int(rx), int(ry))
             )
 
-    screen.blit(cached_text, (x + 10, y - 30))
+    screen.blit(
+        cached_text,
+        (x + 10, y - 30)
+    )
 
     pygame.display.update()
 
-pygame.quit()
+# =========================
+# إنهاء
+# =========================
 
 camera.stop()
+
+pygame.quit()
 
 sys.exit()
