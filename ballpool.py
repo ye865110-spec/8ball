@@ -59,9 +59,8 @@ is_mouse_hovering_gui = False
 window_has_focus = True     
 is_hidden = False             
 
-# 🕹️ متغيرات نظام القوة الفيزيائي
-current_power = 50            
-CUSHION_DEFORMATION = 6       # مقدار مسافة انضغاط المطاط بالبكسل
+# 🕹️ نظام التحكم في القوة
+current_power = 100           # القوة الافتراضية البدائية هي الكاملة (المرايا)
 
 # ==========================================
 # 🧠 4. Ultra-Stable Memory Systems
@@ -152,55 +151,53 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
 def calculate_manual_bank_point(target, pocket, bounds, side, power):
-    """ 
-    🎯 تحديث حركة النقطة: الآن النقطة (Cyan) تتحرك وتغوص بصرياً داخل الباند 
-    عند تغيير القوة لتوضيح انضغاط جدار المطاط وتوسيع زاوية الخروج.
+    """
+    🎯 دالة الباند المحدثة: 
+    - القوة 100% (المرايا) تعكس الزاوية بشكل طبيعي ومباشر.
+    - القوة 50% تعطي زاوية ارتداد أوسع (ضعف القوة الكاملة) عبر تعديل إسقاط جيب المرآة.
+    - حدود اللعب ثابتة دائماً بمقدار نصف قطر الكرة الحقيقي عن الحافة الخارجية للعبة.
     """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
 
-    # الحدود الافتراضية المعتمدة على حافة الكرة (قوة 50)
+    # حدود مساحة حافة اللعب ثابتة تماماً بناءً على طلبك
     adjusted_top = top + BALL_RADIUS
     adjusted_bottom = bottom - BALL_RADIUS
     adjusted_left = left + BALL_RADIUS
     adjusted_right = right - BALL_RADIUS
 
-    # إزاحة الجدران هندسياً عند القوة الكاملة لامتصاص المطاط
-    if power == 100:
-        adjusted_top -= CUSHION_DEFORMATION
-        adjusted_bottom += CUSHION_DEFORMATION
-        adjusted_left -= CUSHION_DEFORMATION
-        adjusted_right += CUSHION_DEFORMATION
+    # معامل تعديل الزاوية للوسط (لو 100% المرايا = 1، لو 50% نوسع الانعكاس بضرب الإسقاط في 1.6 كمثال للبدء ويتم معايرته)
+    angle_factor = 1.0 if power == 100 else 1.6
 
     if side == 'top':
-        mirrored_py = adjusted_top - (py - adjusted_top)
+        # تعديل البعد العمودي للمرآة الافتراضية بناءً على القوة لتوسيع/تضييق خط الخروج
+        dist_y = py - adjusted_top
+        mirrored_py = adjusted_top - (dist_y * angle_factor)
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (adjusted_top - ty) / (mirrored_py - ty)
-            if left <= bx <= right: 
-                # إرجاع الإحداثي المشفت الجديد لكي يتحرك الخط والنقطة للداخل بصرياً
-                return (bx, adjusted_top - BALL_RADIUS)
+            if left <= bx <= right: return (bx, adjusted_top)
             
     elif side == 'bottom':
-        mirrored_py = adjusted_bottom + (adjusted_bottom - py)
+        dist_y = adjusted_bottom - py
+        mirrored_py = adjusted_bottom + (dist_y * angle_factor)
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (adjusted_bottom - ty) / (mirrored_py - ty)
-            if left <= bx <= right: 
-                return (bx, adjusted_bottom + BALL_RADIUS)
+            if left <= bx <= right: return (bx, adjusted_bottom)
             
     elif side == 'left':
-        mirrored_px = adjusted_left - (px - adjusted_left)
+        dist_x = px - adjusted_left
+        mirrored_px = adjusted_left - (dist_x * angle_factor)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (adjusted_left - tx) / (mirrored_px - tx)
-            if top <= by <= bottom: 
-                return (adjusted_left - BALL_RADIUS, by)
+            if top <= by <= bottom: return (adjusted_left, by)
             
     elif side == 'right':
-        mirrored_px = adjusted_right + (adjusted_right - px)
+        dist_x = adjusted_right - px
+        mirrored_px = adjusted_right + (dist_x * angle_factor)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (adjusted_right - tx) / (mirrored_px - tx)
-            if top <= by <= bottom: 
-                return (adjusted_right + BALL_RADIUS, by)
+            if top <= by <= bottom: return (adjusted_right, by)
             
     return None
 
@@ -293,6 +290,7 @@ while running:
     except Exception:
         mx, my = last_known_mx, last_known_my
 
+    # تفعيل التبديل بالكيبورد
     if keyboard.is_pressed("f3") and time.time() - last_power_toggle_time > 0.2:
         current_power = 50
         last_power_toggle_time = time.time()
@@ -433,7 +431,7 @@ while running:
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
     # ==========================================
-    # 🎯 9. Advanced Ray-Trace Engine with Visual Shift
+    # 🎯 9. Perfect Mirror / Wider Angle Engine
     # ==========================================
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
@@ -450,7 +448,7 @@ while running:
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
                 
-                # خطوط الرسم والتقاطع ستتحرك بصرياً للداخل مع قوة 100% الآن لتوضح انحراف زاوية الارتداد
+                # تظل النقطة ثابتة هندسياً على حافة اللعب، والخط الوردي ينحرف تلقائياً بناءً على تفعيل القوة
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
                 pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
                 pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
@@ -466,7 +464,7 @@ while running:
             pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
 
     # ==========================================
-    # 🖼️ 10. Rendering The Matured Floating GUI Menu
+    # 🖼️ 10. Rendering The Floating GUI Menu
     # ==========================================
     pygame.draw.rect(screen, GUI_BG, (gui_x, gui_y, gui_w, gui_h))
     pygame.draw.rect(screen, CYAN, (gui_x, gui_y, gui_w, gui_h), 1)  
