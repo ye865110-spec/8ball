@@ -22,8 +22,8 @@ cv2.setNumThreads(4)
 # ⚙️ 2. Configuration & Hyperparameters
 # ==========================================
 FPS = 144
-BALL_RADIUS = 28  # القطر المتوافق مع أبعاد صورتك الأخيرة 
-CUSHION_PADDING = 22
+BALL_RADIUS = 16  # ✨ تم إعادتها للحجم القديم والمثالي بناءً على طلبك
+CUSHION_PADDING = 16
 MAX_BANKS = 4        
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
@@ -100,14 +100,11 @@ def distance(p1, p2):
     return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
 def ghost_ball(target, pocket, radius):
-    """ معادلة فيزيائية مطورة تضمن التماس المطلق للكرة الوهمية مع الهدف """
     dx = target[0] - pocket[0]
     dy = target[1] - pocket[1]
     dist = math.hypot(dx, dy)
     if dist == 0: return target
-    
-    # نسبة الإزاحة الدقيقة المعتمدة على طول قطر الكرة بالكامل (2 * Radius)
-    ratio = (dist + radius * 2.0) / dist
+    ratio = (dist + radius * 2) / dist
     return (pocket[0] + dx * ratio, pocket[1] + dy * ratio)
 
 def draw_parallel_guidelines(surface, color, start, end, radius):
@@ -178,27 +175,28 @@ def is_strictly_white_ball(roi):
     gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     h, w = gray_roi.shape
     
-    edges = cv2.Canny(gray_roi, 80, 180)
-    center_roi_edges = edges[int(h*0.3):int(h*0.7), int(w*0.3):int(w*0.7)]
-    edge_pixels = np.sum(center_roi_edges > 0)
+    edges = cv2.Canny(gray_roi, 100, 200)
+    center_edges = edges[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
+    edge_pixels = np.sum(center_edges > 0)
     
-    if edge_pixels > 12: 
+    if edge_pixels > 8: 
         return False
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    lower_white = np.array([0, 0, 160]) 
-    upper_white = np.array([180, 60, 255])
+    lower_white = np.array([0, 0, 175]) 
+    upper_white = np.array([180, 50, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
     
     white_ratio = np.sum(mask == 255) / mask.size
-    if white_ratio < 0.45: return False 
+    if white_ratio < 0.50: return False 
     
     center_roi = mask[int(h*0.35):int(h*0.65), int(w*0.35):int(w*0.65)]
     center_white_ratio = np.sum(center_roi == 255) / center_roi.size
     
-    return center_white_ratio > 0.80
+    return center_white_ratio > 0.85
 
-def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y, search_radius=40):
+def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y, search_radius=25):
+    """ إعادة ضبط الـ Snap للكرات ذات الحجم الصغير والمثالي الأصلي """
     h, w, _ = table_img.shape
     
     min_x = max(0, mouse_table_x - search_radius)
@@ -212,12 +210,14 @@ def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y,
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
     
-    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=40, param1=50, param2=14, minRadius=20, maxRadius=38)
+    # الـ HoughCircles هنا تم إعادتها للقيم القديمة شديدة الدقة للحجم الصغير
+    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=50, param2=15, minRadius=12, maxRadius=20)
     
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         best_circle = min(circles, key=lambda c: math.hypot(c[0] - search_radius, c[1] - search_radius))
         cx, cy, _ = best_circle
+        
         return (min_x + cx, min_y + cy)
     
     return None
@@ -268,19 +268,15 @@ while running:
     gray = cv2.cvtColor(table, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
 
-    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=45, param1=65, param2=20, minRadius=20, maxRadius=38)
+    # ✨ تم إرجاع قيم الفحص والأحجام إلى الأصل (12 إلى 20 بكسل للرصد الدقيق)
+    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=70, param2=22, minRadius=12, maxRadius=20)
 
     raw_white_det = None
     mx, my = win32api.GetCursorPos()
 
-    # 🎯 معايرة ديناميكية دقيقة للجيوب الستة بناءً على حواف الطاولة الحقيقية المكتشفة لمنع الانحراف
     pockets = [
-        (x + 18, y + 18),          # جيب علوي أيسر [1]
-        (x + w // 2, y + 10),      # جيب علوي أوسط [2]
-        (x + w - 18, y + 18),      # جيب علوي أيمن [3]
-        (x + 18, y + h - 18),      # جيب سفلي أيسر [4]
-        (x + w // 2, y + h - 10),  # جيب سفلي أوسط [5]
-        (x + w - 18, y + h - 18)   # جيب سفلي أيمن [6]
+        (x + 24, y + 24), (x + w // 2, y + 14), (x + w - 24, y + 24),
+        (x + 24, y + h - 24), (x + w // 2, y + h - 14), (x + w - 24, y + h - 24)
     ]
 
     top_band, bottom_band = y + CUSHION_PADDING, y + h - CUSHION_PADDING
@@ -293,7 +289,7 @@ while running:
         circles = np.round(circles[0, :]).astype("int")
         for (cx, cy, r) in circles:
             cx, cy = int(cx + x), int(cy + y) 
-            if any(distance((cx, cy), p) < 50 for p in pockets): continue
+            if any(distance((cx, cy), p) < 40 for p in pockets): continue
 
             roi = table[max(0, cy-y-r):min(h, cy-y+r), max(0, cx-x-r):min(w, cx-x+r)]
             if is_strictly_white_ball(roi):
@@ -336,7 +332,7 @@ while running:
 
     for idx, p in enumerate(pockets):
         p_color = GREEN if idx == selected_pocket else RED
-        pygame.gfxdraw.aacircle(screen, p[0], p[1], 8, p_color)
+        pygame.gfxdraw.aacircle(screen, p[0], p[1], 6, p_color)
         txt = pocket_font.render(f"{idx+1}", True, WHITE if idx == selected_pocket else ORANGE)
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
@@ -347,7 +343,6 @@ while running:
         active_pocket = pockets[selected_pocket]
         g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
         
-        # رسم الخطوط الثلاثية المماسّة تماماً لسطح الكرة بدون انزياح
         draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
         pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
         pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
