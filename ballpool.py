@@ -42,16 +42,16 @@ GUI_BG = (30, 30, 35)
 GUI_TEXT = (240, 240, 240)  
 GUI_BTN = (200, 50, 50)     
 GUI_HIDE_BTN = (50, 150, 50) 
-GUI_ACTIVE_COLOR = (0, 162, 232) # اللون الأزرق للإشارة إلى القوة النشطة حالياً
+GUI_ACTIVE_COLOR = (0, 162, 232)
 
 last_known_mx = SCREEN_WIDTH // 2
 last_known_my = SCREEN_HEIGHT // 2
 
 # ==========================================
-# 🎛️ 3. GUI Menu State (مطور ليشمل القوى واختياراتها)
+# 🎛️ 3. GUI Menu State
 # ==========================================
 gui_x, gui_y = 50, 50       
-gui_w, gui_h = 160, 185       # زيادة الارتفاع ليتسع لأزرار القوة الجديدة ومؤشرها
+gui_w, gui_h = 160, 185       
 is_dragging = False          
 drag_offset_x = 0
 drag_offset_y = 0
@@ -59,9 +59,9 @@ is_mouse_hovering_gui = False
 window_has_focus = True     
 is_hidden = False             
 
-# 🕹️ متغيرات نظام القوة الفيزيائي الجديد
-current_power = 50            # القوة الافتراضية الابتدائية (50%)
-CUSHION_DEFORMATION = 6       # معامل غوص الكرة بالبكسل داخل المطاط عند ضربة الـ Max Power (100%)
+# 🕹️ متغيرات نظام القوة الفيزيائي
+current_power = 50            
+CUSHION_DEFORMATION = 6       # مقدار مسافة انضغاط المطاط بالبكسل
 
 # ==========================================
 # 🧠 4. Ultra-Stable Memory Systems
@@ -153,20 +153,20 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
 
 def calculate_manual_bank_point(target, pocket, bounds, side, power):
     """ 
-    🧠 دالة الباند الفيزيائية المحدثة: تدمج حافة الكرة + قوة الضربة المختارة مسبقاً
-    القوة 100% تقوم بتشوية افتراضي في الجدار للخارج مما يمنحك زاوية خروج أوسع (Shorten Bank).
+    🎯 تحديث حركة النقطة: الآن النقطة (Cyan) تتحرك وتغوص بصرياً داخل الباند 
+    عند تغيير القوة لتوضيح انضغاط جدار المطاط وتوسيع زاوية الخروج.
     """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
 
-    # الحساب الأساسي القائم على حافة ملامسة مركز الكرة (القوة 50)
+    # الحدود الافتراضية المعتمدة على حافة الكرة (قوة 50)
     adjusted_top = top + BALL_RADIUS
     adjusted_bottom = bottom - BALL_RADIUS
     adjusted_left = left + BALL_RADIUS
     adjusted_right = right - BALL_RADIUS
 
-    # 🕹️ إذا كانت القوة 100%، نزحف بالجدار للاستجابة لانضغاط المطاط لتوسيع الزاوية
+    # إزاحة الجدران هندسياً عند القوة الكاملة لامتصاص المطاط
     if power == 100:
         adjusted_top -= CUSHION_DEFORMATION
         adjusted_bottom += CUSHION_DEFORMATION
@@ -177,22 +177,31 @@ def calculate_manual_bank_point(target, pocket, bounds, side, power):
         mirrored_py = adjusted_top - (py - adjusted_top)
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (adjusted_top - ty) / (mirrored_py - ty)
-            if left <= bx <= right: return (bx, top)
+            if left <= bx <= right: 
+                # إرجاع الإحداثي المشفت الجديد لكي يتحرك الخط والنقطة للداخل بصرياً
+                return (bx, adjusted_top - BALL_RADIUS)
+            
     elif side == 'bottom':
         mirrored_py = adjusted_bottom + (adjusted_bottom - py)
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (adjusted_bottom - ty) / (mirrored_py - ty)
-            if left <= bx <= right: return (bx, bottom)
+            if left <= bx <= right: 
+                return (bx, adjusted_bottom + BALL_RADIUS)
+            
     elif side == 'left':
         mirrored_px = adjusted_left - (px - adjusted_left)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (adjusted_left - tx) / (mirrored_px - tx)
-            if top <= by <= bottom: return (left, by)
+            if top <= by <= bottom: 
+                return (adjusted_left - BALL_RADIUS, by)
+            
     elif side == 'right':
         mirrored_px = adjusted_right + (adjusted_right - px)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (adjusted_right - tx) / (mirrored_px - tx)
-            if top <= by <= bottom: return (right, by)
+            if top <= by <= bottom: 
+                return (adjusted_right + BALL_RADIUS, by)
+            
     return None
 
 # ==========================================
@@ -284,7 +293,6 @@ while running:
     except Exception:
         mx, my = last_known_mx, last_known_my
 
-    # 🕹️ مراقبة اختصارات الكيبورد السريعة لتغيير القوة مسبقاً قبل الضربة
     if keyboard.is_pressed("f3") and time.time() - last_power_toggle_time > 0.2:
         current_power = 50
         last_power_toggle_time = time.time()
@@ -292,7 +300,6 @@ while running:
         current_power = 100
         last_power_toggle_time = time.time()
 
-    # التحكم في اختصار إخفاء البرنامج
     if keyboard.is_pressed("ctrl+h") and time.time() - last_hide_toggle_time > 0.3:
         is_hidden = not is_hidden
         last_hide_toggle_time = time.time()
@@ -313,17 +320,13 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if is_mouse_hovering_gui:
-                # أ) الضغط على زر اختيار قوة 50%
                 if (gui_x + 15 <= mx <= gui_x + 75) and (gui_y + 45 <= my <= gui_y + 75):
                     current_power = 50
-                # ب) الضغط على زر اختيار قوة 100%
                 elif (gui_x + 85 <= mx <= gui_x + 145) and (gui_y + 45 <= my <= gui_y + 75):
                     current_power = 100
-                # ج) زر الإخفاء المؤقت (تم ترحيل مواقعه لأسفل بسبب أزرار القوة)
                 elif (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 95 <= my <= gui_y + 127):
                     is_hidden = True
                     last_hide_toggle_time = time.time()
-                # د) زر الإغلاق النهائي
                 elif (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 135 <= my <= gui_y + 167):
                     running = False
                 else:
@@ -347,9 +350,6 @@ while running:
         pygame.display.update()
         continue
 
-    # ==========================================
-    # 🎱 Screen Capture & Core Game Analysis
-    # ==========================================
     frame = camera.get_latest_frame()
     if frame is None: continue
 
@@ -433,7 +433,7 @@ while running:
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
     # ==========================================
-    # 🎯 9. Advanced Ray-Trace Engine with Power Compensation
+    # 🎯 9. Advanced Ray-Trace Engine with Visual Shift
     # ==========================================
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
@@ -444,13 +444,13 @@ while running:
         elif keyboard.is_pressed("k"): chosen_side = 'right'
 
         if chosen_side:
-            # تمرير القوة المختارة الحالية للدالة لحساب الارتداد بناءً على شدة انضغاط الباند
             bank_point = calculate_manual_bank_point(stable_target, active_pocket, table_bounds, chosen_side, current_power)
             if bank_point:
                 g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
                 
+                # خطوط الرسم والتقاطع ستتحرك بصرياً للداخل مع قوة 100% الآن لتوضح انحراف زاوية الارتداد
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
                 pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
                 pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
@@ -475,7 +475,6 @@ while running:
     title_txt = gui_title_font.render("🎱 Billiards Tool Panel", True, CYAN)
     screen.blit(title_txt, (gui_x + 12, gui_y + 4))
 
-    # 🕹️ رسم أزرار تعيين القوة المسبقة تزامناً مع الكيبورد والقائمة
     power_lbl = gui_title_font.render(f"Target Power: {current_power}%", True, ORANGE)
     screen.blit(power_lbl, (gui_x + 15, gui_y + 28))
 
