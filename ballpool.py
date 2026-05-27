@@ -22,9 +22,8 @@ cv2.setNumThreads(4)
 # ⚙️ 2. Configuration & Hyperparameters
 # ==========================================
 FPS = 144
-BALL_RADIUS = 16  # الحجم القديم والمثالي المعتمد
+BALL_RADIUS = 16  # المقاس المعتمد والمثالي القديم
 CUSHION_PADDING = 16
-MAX_BANKS = 4        
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
 SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
@@ -94,7 +93,7 @@ table_region = None
 last_lock_time = 0
 
 # ==========================================
-# 📐 4. Advanced Math & Ray-Traced Physics
+# 📐 4. Advanced Math & Physical Reflections
 # ==========================================
 def distance(p1, p2):
     return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
@@ -122,79 +121,37 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
     pygame.draw.line(surface, color, (int(start[0] + nx), int(start[1] + ny)), (int(end[0] + nx), int(end[1] + ny)), 1)
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
-def calculate_single_bank_point(target, pocket, bounds):
-    """ حساب فيزيائي دقيق لنقطة ارتداد مفردة نظيفة تعتمد على ارتداد الجدار المستقيم التماثلي """
+def calculate_manual_bank_point(target, pocket, bounds, side):
+    """ حساب نقطة الارتداد الدقيقة بناءً على الباند المختار يدوياً عبر الحروف """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
 
-    candidates = []
-
-    # حساب جدار الارتداد الأقرب منطقياً لمسار الكرة والبوكيت لمنع خطوط الزجزاج العشوائية
-    # 1. الباند العلوي (إذا كان البوكيت والكرة في النصف العلوي)
-    mirrored_py = top - (py - top)
-    if (mirrored_py - ty) != 0:
-        bx = tx + (px - tx) * (top - ty) / (mirrored_py - ty)
-        if left <= bx <= right:
-            candidates.append((bx, top))
-
-    # 2. الباند السفلي
-    mirrored_py = bottom + (bottom - py)
-    if (mirrored_py - ty) != 0:
-        bx = tx + (px - tx) * (bottom - ty) / (mirrored_py - ty)
-        if left <= bx <= right:
-            candidates.append((bx, bottom))
-
-    # 3. الباند الأيسر
-    mirrored_px = left - (px - left)
-    if (mirrored_px - tx) != 0:
-        by = ty + (py - ty) * (left - tx) / (mirrored_px - tx)
-        if top <= by <= bottom:
-            candidates.append((left, by))
-
-    # 4. الباند الأيمن
-    mirrored_px = right + (right - px)
-    if (mirrored_px - tx) != 0:
-        by = ty + (py - ty) * (right - tx) / (mirrored_px - tx)
-        if top <= by <= bottom:
-            candidates.append((right, by))
-
-    # نختار الجدار الأقرب لموقع الكرة المستهدفة لضمان واقعية الضربة
-    if candidates:
-        best_point = min(candidates, key=lambda pt: distance(target, pt))
-        return best_point
+    if side == 'top':
+        mirrored_py = top - (py - top)
+        if (mirrored_py - ty) != 0:
+            bx = tx + (px - tx) * (top - ty) / (mirrored_py - ty)
+            if left <= bx <= right: return (bx, top)
+            
+    elif side == 'bottom':
+        mirrored_py = bottom + (bottom - py)
+        if (mirrored_py - ty) != 0:
+            bx = tx + (px - tx) * (bottom - ty) / (mirrored_py - ty)
+            if left <= bx <= right: return (bx, bottom)
+            
+    elif side == 'left':
+        mirrored_px = left - (px - left)
+        if (mirrored_px - tx) != 0:
+            by = ty + (py - ty) * (left - tx) / (mirrored_px - tx)
+            if top <= by <= bottom: return (left, by)
+            
+    elif side == 'right':
+        mirrored_px = right + (right - px)
+        if (mirrored_px - tx) != 0:
+            by = ty + (py - ty) * (right - tx) / (mirrored_px - tx)
+            if top <= by <= bottom: return (right, by)
+            
     return None
-
-def calculate_multi_bank(start_pos, target_pos, bounds, max_banks=MAX_BANKS):
-    left, top, right, bottom = bounds
-    path = [start_pos]
-    current_pos = start_pos
-    
-    dx = target_pos[0] - start_pos[0]
-    dy = target_pos[1] - start_pos[1]
-    angle = math.atan2(dy, dx)
-    
-    vx = math.cos(angle)
-    vy = math.sin(angle)
-    
-    for _ in range(max_banks):
-        t_candidates = []
-        if vx > 0: t_candidates.append(((right - current_pos[0]) / vx, 'R'))
-        elif vx < 0: t_candidates.append(((left - current_pos[0]) / vx, 'L'))
-        if vy > 0: t_candidates.append(((bottom - current_pos[1]) / vy, 'B'))
-        elif vy < 0: t_candidates.append(((top - current_pos[1]) / vy, 'T'))
-        
-        if not t_candidates: break
-        t, side = min(t_candidates, key=lambda item: item[0])
-        
-        next_x = current_pos[0] + vx * t
-        next_y = current_pos[1] + vy * t
-        current_pos = (next_x, next_y)
-        path.append(current_pos)
-        
-        if side in ('L', 'R'): vx = -vx
-        if side in ('T', 'B'): vy = -vy
-    return path
 
 # ==========================================
 # 🖼️ 5. Strict Filters & Snapping Engine
@@ -344,16 +301,12 @@ while running:
     if keyboard.is_pressed("z") and time.time() - last_lock_time > 0.15:
         mouse_table_x = mx - x
         mouse_table_y = my - y
-        
         precise_center = find_precise_ball_center_near_mouse(table, mouse_table_x, mouse_table_y)
         
         if precise_center is not None:
-            snap_x = int(precise_center[0] + x)
-            snap_y = int(precise_center[1] + y)
-            target_manager.lock_new(snap_x, snap_y)
+            target_manager.lock_new(int(precise_center[0] + x), int(precise_center[1] + y))
         else:
             target_manager.lock_new(mx, my)
-            
         last_lock_time = time.time()
 
     if keyboard.is_pressed("x"):
@@ -376,47 +329,44 @@ while running:
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
     # ==========================================
-    # 🎯 8. Independent Persistent Ray-Trace Engine
+    # 🎯 8. Dynamic Controlled Ray-Trace Engine
     # ==========================================
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
         
-        # 🌟 إصلاح جذري: إذا كان المستخدم يضغط على الأزرار المخصصة للمسار المتعدد (Multi-Bank)
-        if keyboard.is_pressed("i") or keyboard.is_pressed("m") or keyboard.is_pressed("j") or keyboard.is_pressed("k"):
-            g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
-            draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
-            pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
-            
-            bank_nodes = calculate_multi_bank(g_pos, active_pocket, table_bounds, max_banks=MAX_BANKS)
-            for step in range(len(bank_nodes) - 1):
-                p_start = (int(bank_nodes[step][0]), int(bank_nodes[step+1][1]))
-                p_end = (int(bank_nodes[step+1][0]), int(bank_nodes[step+1][1]))
-                pygame.draw.line(screen, PINK, p_start, p_end, 2)
-                pygame.gfxdraw.filled_circle(screen, p_end[0], p_end[1], 4, CYAN)
-        else:
-            # 🟢 الوضع الافتراضي الذكي: رسم مسار ارتداد مفرد (Single Bank Shot) نظيف جداً وصحيح فيزيائياً
-            bank_point = calculate_single_bank_point(stable_target, active_pocket, table_bounds)
+        # 🟢 رصد الحروف والتحكم اليدوي في اتجاه الباند المفرد بناءً على طلبك
+        chosen_side = None
+        if keyboard.is_pressed("i"): chosen_side = 'top'
+        elif keyboard.is_pressed("m"): chosen_side = 'bottom'
+        elif keyboard.is_pressed("j"): chosen_side = 'left'
+        elif keyboard.is_pressed("k"): chosen_side = 'right'
+
+        if chosen_side:
+            # 1. حساب الباند اليدوي المختار فوراً
+            bank_point = calculate_manual_bank_point(stable_target, active_pocket, table_bounds, chosen_side)
             
             if bank_point:
-                # الـ Ghost ball يجب أن توضع في زاوية التماس الصحيحة مع نقطة الارتداد على الباند وليس البوكيت مباشرة!
                 g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
-                
-                # 1. خطوط المحاذاة الثلاثية من الكرة البيضاء إلى الـ Ghost Ball الموزونة
+                # رسم الخطوط الثلاثية المتوازية للـ Ghost ball الموجهة للباند
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
                 
-                # 2. خط من الكرة المستهدفة إلى الباند العاكس مباشرة (الأصفر)
+                # خط من الكرة المحددة للباند (أصفر) ومن الباند للبوكيت (وردي)
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
-                
-                # 3. خط من الباند العاكس إلى البوكيت المختار (الوردي الفسفوري)
                 pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
                 pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
             else:
-                # حل احتياطي إذا تعذر حساب نقطة الارتداد (الخط المباشر)
+                # حل احتياطي ستريت إذا لم تتقاطع زاوية الحرف هندسياً
                 g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
+        else:
+            # 🎱 الوضع الافتراضي (ستريت عادي جداً ونظيف بدون أي باند عشوائي)
+            g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
+            draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
+            pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
+            pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
 
     pygame.display.update()
 
