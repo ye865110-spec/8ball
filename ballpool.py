@@ -11,7 +11,6 @@ import sys
 import time
 import keyboard
 from filterpy.kalman import KalmanFilter
-from scipy.spatial import distance as scipy_dist
 
 # ==========================================
 # 🚀 1. OpenCV & Performance Optimization
@@ -42,91 +41,13 @@ ORANGE = (255, 165, 0)
 CYAN = (0, 200, 255)
 
 # ==========================================
-# 🧠 3. Advanced Tracking with Memory (حل الاختفاء)
+# 🧠 3. Stable Memory Systems
 # ==========================================
-class BallTracker:
-    def __init__(self):
-        self.trackers = {}
-        self.next_id = 0
-        self.max_lost_frames = 45  # سيتذكر الكرة حتى لو اختفت لمدة 45 إطار كامل بسبب العصا!
-
-    def create_kf(self, x, y):
-        kf = KalmanFilter(dim_x=4, dim_z=2)
-        kf.x = np.array([x, y, 0., 0.]) 
-        kf.F = np.array([[1., 0., 1./FPS, 0.],
-                         [0., 1., 0., 1./FPS],
-                         [0., 0., 1., 0.],
-                         [0., 0., 0., 1.]])
-        kf.H = np.array([[1., 0., 0., 0.],
-                         [0., 1., 0., 0.]])
-        kf.P *= 5.
-        kf.R *= 0.1  # تقليل التشويش لزيادة الثبات ومنع الارتعاش
-        kf.Q *= 0.01
-        return {"kf": kf, "lost_frames": 0}
-
-    def update(self, detections):
-        updated_trackers = {}
-        det_pts = np.array(detections) if detections else np.empty((0, 2))
-        
-        # التنبؤ المسبق لكل الفلاتر الحالية
-        for tid, data in self.trackers.items():
-            data["kf"].predict()
-
-        if len(det_pts) == 0:
-            # إذا لم يتم اكتشاف شيء، حافظ على الكرات الحالية وزد عداد الفقدان
-            for tid, data in self.trackers.items():
-                data["lost_frames"] += 1
-                if data["lost_frames"] <= self.max_lost_frames:
-                    updated_trackers[tid] = data
-            self.trackers = updated_trackers
-            return updated_trackers
-
-        if not self.trackers:
-            for pt in det_pts:
-                updated_trackers[self.next_id] = self.create_kf(pt[0], pt[1])
-                self.next_id += 1
-            self.trackers = updated_trackers
-            return updated_trackers
-
-        track_ids = list(self.trackers.keys())
-        track_pts = np.array([self.trackers[tid]["kf"].x[0:2] for tid in track_ids])
-
-        cost_matrix = scipy_dist.cdist(track_pts, det_pts)
-        assigned_det = set()
-        
-        for idx, tid in enumerate(track_ids):
-            if cost_matrix.shape[1] == 0: break
-            min_det_idx = np.argmin(cost_matrix[idx])
-            
-            # تم زيادة مسافة السماحية للتتبع إلى 50 بكسل لمنع القفز العشوائي
-            if cost_matrix[idx, min_det_idx] < 50 and min_det_idx not in assigned_det:
-                data = self.trackers[tid]
-                data["kf"].update(det_pts[min_det_idx])
-                data["lost_frames"] = 0  # إعادة تصغير العداد لأننا وجدناها
-                updated_trackers[tid] = data
-                assigned_det.add(min_det_idx)
-            else:
-                # الحفاظ على الكرة مؤقتاً حتى لو لم تطابق أي اكتشاف جديد (بسبب حجب العصا لها)
-                data = self.trackers[tid]
-                data["lost_frames"] += 1
-                if data["lost_frames"] <= self.max_lost_frames:
-                    updated_trackers[tid] = data
-
-        # إضافة كرات جديدة بالكامل
-        for min_det_idx in range(len(det_pts)):
-            if min_det_idx not in assigned_det:
-                updated_trackers[self.next_id] = self.create_kf(det_pts[min_det_idx][0], det_pts[min_det_idx][1])
-                self.next_id += 1
-
-        self.trackers = updated_trackers
-        return updated_trackers
-
-# الذاكرة الخاصة بالكرة البيضاء لمنع اختفائها عند اقتراب العصا
 class WhiteBallMemory:
     def __init__(self):
         self.last_known_pos = None
         self.lost_frames = 0
-        self.max_lost_frames = 60 # تذكر الكرة البيضاء حتى لو اختفت تماماً تحت العصا لـ 60 إطار
+        self.max_lost_frames = 60  # تذكر الكرة البيضاء تحت العصا لمدة 60 إطار
 
     def update(self, raw_white):
         if raw_white is not None:
@@ -140,11 +61,44 @@ class WhiteBallMemory:
                     return self.last_known_pos
             return None
 
-# تفعيل كائنات التتبع والذاكرة المستقرة
-tracker_system = BallTracker()
-white_memory = WhiteBallMemory()
+class TargetBallManager:
+    def __init__(self):
+        self.locked_pos = None
+        self.kf = None
 
-locked_id = None
+    def init_kf(self, x, y):
+        self.kf = KalmanFilter(dim_x=4, dim_z=2)
+        self.kf.x = np.array([x, y, 0., 0.]) 
+        self.kf.F = np.array([[1., 0., 1./FPS, 0.],
+                             [0., 1., 0., 1./FPS],
+                             [0., 0., 1., 0.],
+                             [0., 0., 0., 1.]])
+        self.kf.H = np.array([[1., 0., 0., 0.],
+                             [0., 1., 0., 0.]])
+        self.kf.P *= 5.
+        self.kf.R *= 0.05  # فلتر فائق النعومة للكرة المحددة يدوياً
+        self.kf.Q *= 0.01
+
+    def lock_new(self, x, y):
+        self.locked_pos = (x, y)
+        self.init_kf(x, y)
+
+    def update(self):
+        if self.kf is not None:
+            self.kf.predict()
+            # الكرة الهدف المحددة بالماوس ثابتة ما لم نقم بتحديثها، لذا نغذي الفلتر بموقعها المستقر
+            self.kf.update(np.array(self.locked_pos))
+            return (float(self.kf.x[0]), float(self.kf.x[1]))
+        return self.locked_pos
+
+    def clear(self):
+        self.locked_pos = None
+        self.kf = None
+
+# تفعيل كائنات الذاكرة والتتبع الجديد
+white_memory = WhiteBallMemory()
+target_manager = TargetBallManager()
+
 selected_pocket = 0
 table_region = None
 last_lock_time = 0
@@ -155,11 +109,6 @@ last_lock_time = 0
 def distance(p1, p2):
     return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-def get_predictive_aim(kf, lead_time=0.10):
-    px = kf.x[0] + kf.x[2] * lead_time
-    py = kf.x[1] + kf.x[3] * lead_time
-    return (float(px), float(py))
-
 def ghost_ball(target, pocket, radius):
     dx = target[0] - pocket[0]
     dy = target[1] - pocket[1]
@@ -168,7 +117,7 @@ def ghost_ball(target, pocket, radius):
     ratio = (dist + radius * 2) / dist
     return (pocket[0] + dx * ratio, pocket[1] + dy * ratio)
 
-def apply_spin_and_deflection(start, end, spin_factor=0.01):
+def apply_spin_and_deflection(start, end, spin_factor=0.005):
     dx = end[0] - start[0]
     dy = end[1] - start[1]
     perp_x = -dy * spin_factor
@@ -207,7 +156,7 @@ def calculate_multi_bank(start_pos, target_pos, bounds, max_banks=MAX_BANKS):
     return path
 
 # ==========================================
-# 🖼️ 5. Vision Frame Analyzers
+# 🖼️ 5. Vision Frame Analyzers (الكرة البيضاء فقط)
 # ==========================================
 def detect_table(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -225,7 +174,7 @@ def detect_table(frame):
 def is_white_ball(roi):
     if roi is None or roi.size == 0: return False
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    lower = np.array([0, 0, 150]) # تم توسيع المدى قليلاً لضمان التقاط الأبيض تحت ظلال العصا
+    lower = np.array([0, 0, 150]) 
     upper = np.array([180, 75, 255])
     mask = cv2.inRange(hsv, lower, upper)
     return (np.sum(mask == 255) / mask.size) > 0.38
@@ -277,11 +226,10 @@ while running:
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
 
-    # تحسين بارامترات التقاط الدوائر لتقليص الخطأ الإيجابي والارتعاش
+    # معالجة سريعة جداً ومخصصة للكرة البيضاء فقط لتقليل استهلاك الـ CPU
     circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.1, minDist=22, param1=60, param2=19, minRadius=7, maxRadius=16)
 
     raw_white_det = None
-    detected_targets = []
     mx, my = win32api.GetCursorPos()
 
     pockets = [
@@ -305,38 +253,33 @@ while running:
             roi = table[max(0, cy-y-r):min(h, cy-y+r), max(0, cx-x-r):min(w, cx-x+r)]
             if is_white_ball(roi):
                 raw_white_det = (cx, cy)
-            else:
-                detected_targets.append((cx, cy))
+                break # بمجرد العثور على البيضاء نقوم بإنهاء حلقة البحث فوراً لزيادة السرعة
 
-    # تمرير النتيجة لنظام الذاكرة المستقرة
+    # تحديث الكرة البيضاء الذاكرة المستقرة
     stable_white = white_memory.update(raw_white_det)
-    tracked_balls = tracker_system.update(detected_targets)
 
-    # رسم الكرة البيضاء (مستقرة الآن ولا تختفي مع حركة العصا)
     if stable_white:
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS, WHITE)
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS - 2, CYAN)
 
-    hovered_id = None
-    for b_id, data in tracked_balls.items():
-        kf = data["kf"]
-        pred_pos = get_predictive_aim(kf)
-        pos_x, pos_y = int(pred_pos[0]), int(pred_pos[1])
-        
-        color = BLUE if b_id == locked_id else YELLOW
-        pygame.gfxdraw.aacircle(screen, pos_x, pos_y, BALL_RADIUS, color)
-        
-        if distance((mx, my), (pos_x, pos_y)) < BALL_RADIUS + 10:
-            hovered_id = b_id
-
-    # التحكم بالقفل
+    # قفل الكرة الهدف يدوياً (الوقوف بالماوس والضغط على Z)
     if keyboard.is_pressed("z") and time.time() - last_lock_time > 0.2:
-        if hovered_id is not None:
-            locked_id = hovered_id
-            last_lock_time = time.time()
-    if keyboard.is_pressed("x"):
-        locked_id = None
+        # الكود الآن يقفل الإحداثيات الحالية للماوس مباشرة كـ كرة مستهدفة
+        target_manager.lock_new(mx, my)
+        last_lock_time = time.time()
 
+    if keyboard.is_pressed("x"):
+        target_manager.clear()
+
+    # تحديث موقع الكرة الهدف المحددة وقراءتها عبر الفلتر
+    stable_target = target_manager.update()
+
+    # رسم الكرة المحددة باللون الأزرق لتعرف أنها مقفلة
+    if stable_target:
+        pygame.gfxdraw.aacircle(screen, int(stable_target[0]), int(stable_target[1]), BALL_RADIUS, BLUE)
+        pygame.gfxdraw.aacircle(screen, int(stable_target[0]), int(stable_target[1]), BALL_RADIUS - 2, YELLOW)
+
+    # تبديل الجيوب بالضغط على الأرقام من 1 إلى 6
     for i in range(1, 7):
         if keyboard.is_pressed(str(i)):
             selected_pocket = i - 1
@@ -350,20 +293,18 @@ while running:
     # ==========================================
     # 🎯 8. Core Advanced Ray-Trace Solver Engine
     # ==========================================
-    # تم تعديل الشرط ليعتمد على الذاكرة المستقرة للكرة البيضاء وللكرة الهدف
-    if stable_white and locked_id in tracked_balls:
-        kf_target = tracked_balls[locked_id]["kf"]
-        target_pos = get_predictive_aim(kf_target)
+    if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
 
-        g_pos = ghost_ball(target_pos, active_pocket, BALL_RADIUS)
+        g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
         g_pos = apply_spin_and_deflection(stable_white, g_pos, spin_factor=0.005)
         
-        # رسم الخطوط الرئيسية بثبات تام
+        # رسم الخطوط الرئيسية بثبات تام دون أي اهتزاز
         pygame.draw.line(screen, WHITE, (int(stable_white[0]), int(stable_white[1])), (int(g_pos[0]), int(g_pos[1])), 2)
         pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
-        pygame.draw.line(screen, YELLOW, (int(target_pos[0]), int(target_pos[1])), active_pocket, 2)
+        pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
 
+        # حساب الباند العكسي المتعدد عند تفعيل أزرار الارتداد
         if keyboard.is_pressed("i") or keyboard.is_pressed("m") or keyboard.is_pressed("j") or keyboard.is_pressed("k"):
             bank_nodes = calculate_multi_bank(g_pos, active_pocket, table_bounds, max_banks=MAX_BANKS)
             for step in range(len(bank_nodes) - 1):
