@@ -22,8 +22,8 @@ cv2.setNumThreads(4)
 # ⚙️ 2. Configuration & Hyperparameters
 # ==========================================
 FPS = 144
-BALL_RADIUS = 16  
-CUSHION_PADDING = 16
+BALL_RADIUS = 28  # تم تكبير نصف القطر الافتراضي ليتطابق مع أبعاد الشاشة الكاملة في صورتك
+CUSHION_PADDING = 20
 MAX_BANKS = 4        
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
@@ -175,31 +175,32 @@ def is_strictly_white_ball(roi):
     gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     h, w = gray_roi.shape
     
-    edges = cv2.Canny(gray_roi, 100, 200)
-    center_edges = edges[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
-    edge_pixels = np.sum(center_edges > 0)
+    edges = cv2.Canny(gray_roi, 80, 180)
+    center_roi_edges = edges[int(h*0.3):int(h*0.7), int(w*0.3):int(w*0.7)]
+    edge_pixels = np.sum(center_roi_edges > 0)
     
-    if edge_pixels > 8: 
+    # الكرات الملونة والمخططة تولد حواف كثيرة بسبب الأرقام والخطوط
+    if edge_pixels > 12: 
         return False
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    lower_white = np.array([0, 0, 175]) 
-    upper_white = np.array([180, 50, 255])
+    # تعديل النطاق ليتناسب مع الإضاءة القوية والسطوع للطاولة الكاملة
+    lower_white = np.array([0, 0, 160]) 
+    upper_white = np.array([180, 60, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
     
     white_ratio = np.sum(mask == 255) / mask.size
-    if white_ratio < 0.50: return False 
+    if white_ratio < 0.45: return False 
     
     center_roi = mask[int(h*0.35):int(h*0.65), int(w*0.35):int(w*0.65)]
     center_white_ratio = np.sum(center_roi == 255) / center_roi.size
     
-    return center_white_ratio > 0.85
+    return center_white_ratio > 0.80
 
-def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y, search_radius=25):
-    """ ميزة المغناطيس الرقمي: تبحث حول موقع الماوس عن المركز الهندسي الحقيقي لأي كرة """
+def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y, search_radius=40):
+    """ تعديل أبعاد المغناطيس الرقمي لتتناسب مع الكرات الكبيرة الحجم """
     h, w, _ = table_img.shape
     
-    # تحديد منطقة فحص صغيرة جداً حول الماوس (ROI)
     min_x = max(0, mouse_table_x - search_radius)
     max_x = min(w, mouse_table_x + search_radius)
     min_y = max(0, mouse_table_y - search_radius)
@@ -211,16 +212,13 @@ def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y,
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
     
-    # البحث عن أي دائرة قريبة جداً من مؤشر الماوس
-    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=50, param2=15, minRadius=12, maxRadius=20)
+    # تحديث بارامترات الـ HoughCircles للبحث عن كرات بأحجامها الكبيرة الواقعية
+    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=40, param1=50, param2=14, minRadius=20, maxRadius=38)
     
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
-        # اختيار الدائرة الأقرب لمركز الـ ROI (أي الأقرب للماوس بالظبط)
         best_circle = min(circles, key=lambda c: math.hypot(c[0] - search_radius, c[1] - search_radius))
         cx, cy, _ = best_circle
-        
-        # إعادة الإحداثيات الحقيقية منسوبة للطاولة
         return (min_x + cx, min_y + cy)
     
     return None
@@ -271,14 +269,15 @@ while running:
     gray = cv2.cvtColor(table, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
 
-    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=70, param2=22, minRadius=12, maxRadius=20)
+    # 🚨 الأهم: تم تكبير minRadius و maxRadius و minDist لتتطابق تماماً مع الأبعاد الحقيقية في الصورة بدون Resize
+    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=45, param1=65, param2=20, minRadius=20, maxRadius=38)
 
     raw_white_det = None
     mx, my = win32api.GetCursorPos()
 
     pockets = [
-        (x + 24, y + 24), (x + w // 2, y + 14), (x + w - 24, y + 24),
-        (x + 24, y + h - 24), (x + w // 2, y + h - 14), (x + w - 24, y + h - 24)
+        (x + 35, y + 35), (x + w // 2, y + 20), (x + w - 35, y + 35),
+        (x + 35, y + h - 35), (x + w // 2, y + h - 20), (x + w - 35, y + h - 35)
     ]
 
     top_band, bottom_band = y + CUSHION_PADDING, y + h - CUSHION_PADDING
@@ -291,7 +290,7 @@ while running:
         circles = np.round(circles[0, :]).astype("int")
         for (cx, cy, r) in circles:
             cx, cy = int(cx + x), int(cy + y) 
-            if any(distance((cx, cy), p) < 40 for p in pockets): continue
+            if any(distance((cx, cy), p) < 50 for p in pockets): continue
 
             roi = table[max(0, cy-y-r):min(h, cy-y+r), max(0, cx-x-r):min(w, cx-x+r)]
             if is_strictly_white_ball(roi):
@@ -304,22 +303,17 @@ while running:
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS, WHITE)
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS - 2, CYAN)
 
-    # 🎯 تفعيل محرك الـ Auto-Snap عند الضغط على Z
     if keyboard.is_pressed("z") and time.time() - last_lock_time > 0.15:
-        # تحويل إحداثيات الماوس الحقيقية لتتوافق مع إحداثيات الطاولة الداخلية
         mouse_table_x = mx - x
         mouse_table_y = my - y
         
-        # البحث عن المركز الدقيق لأقرب كرة في محيط الماوس
         precise_center = find_precise_ball_center_near_mouse(table, mouse_table_x, mouse_table_y)
         
         if precise_center is not None:
-            # إذا وجد كرة قريبة، يقوم بجذب القفل للمركز الحقيقي بالملّي!
             snap_x = int(precise_center[0] + x)
             snap_y = int(precise_center[1] + y)
             target_manager.lock_new(snap_x, snap_y)
         else:
-            # خيار احتياطي لو ضغطت في منطقة فارغة تماماً بدون كرات
             target_manager.lock_new(mx, my)
             
         last_lock_time = time.time()
@@ -339,7 +333,7 @@ while running:
 
     for idx, p in enumerate(pockets):
         p_color = GREEN if idx == selected_pocket else RED
-        pygame.gfxdraw.aacircle(screen, p[0], p[1], 6, p_color)
+        pygame.gfxdraw.aacircle(screen, p[0], p[1], 8, p_color)
         txt = pocket_font.render(f"{idx+1}", True, WHITE if idx == selected_pocket else ORANGE)
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
