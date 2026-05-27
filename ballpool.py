@@ -168,7 +168,7 @@ def calculate_manual_bank_point(target, pocket, bounds, side, power):
     adjusted_right = right - BALL_RADIUS
 
     # معامل تعديل الزاوية للوسط (لو 100% المرايا = 1، لو 50% نوسع الانعكاس بضرب الإسقاط في 1.6 كمثال للبدء ويتم معايرته)
-    angle_factor = 1.0 if power == 100 else 1.6
+    angle_factor = 1.0 if power == 100 else 2
 
     if side == 'top':
         # تعديل البعد العمودي للمرآة الافتراضية بناءً على القوة لتوسيع/تضييق خط الخروج
