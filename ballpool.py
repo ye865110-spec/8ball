@@ -22,8 +22,8 @@ cv2.setNumThreads(4)
 # ⚙️ 2. Configuration & Hyperparameters
 # ==========================================
 FPS = 144
-BALL_RADIUS = 28  # تم تكبير نصف القطر الافتراضي ليتطابق مع أبعاد الشاشة الكاملة في صورتك
-CUSHION_PADDING = 20
+BALL_RADIUS = 28  # القطر المتوافق مع أبعاد صورتك الأخيرة 
+CUSHION_PADDING = 22
 MAX_BANKS = 4        
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
@@ -100,11 +100,14 @@ def distance(p1, p2):
     return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
 def ghost_ball(target, pocket, radius):
+    """ معادلة فيزيائية مطورة تضمن التماس المطلق للكرة الوهمية مع الهدف """
     dx = target[0] - pocket[0]
     dy = target[1] - pocket[1]
     dist = math.hypot(dx, dy)
     if dist == 0: return target
-    ratio = (dist + radius * 2) / dist
+    
+    # نسبة الإزاحة الدقيقة المعتمدة على طول قطر الكرة بالكامل (2 * Radius)
+    ratio = (dist + radius * 2.0) / dist
     return (pocket[0] + dx * ratio, pocket[1] + dy * ratio)
 
 def draw_parallel_guidelines(surface, color, start, end, radius):
@@ -179,12 +182,10 @@ def is_strictly_white_ball(roi):
     center_roi_edges = edges[int(h*0.3):int(h*0.7), int(w*0.3):int(w*0.7)]
     edge_pixels = np.sum(center_roi_edges > 0)
     
-    # الكرات الملونة والمخططة تولد حواف كثيرة بسبب الأرقام والخطوط
     if edge_pixels > 12: 
         return False
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    # تعديل النطاق ليتناسب مع الإضاءة القوية والسطوع للطاولة الكاملة
     lower_white = np.array([0, 0, 160]) 
     upper_white = np.array([180, 60, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
@@ -198,7 +199,6 @@ def is_strictly_white_ball(roi):
     return center_white_ratio > 0.80
 
 def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y, search_radius=40):
-    """ تعديل أبعاد المغناطيس الرقمي لتتناسب مع الكرات الكبيرة الحجم """
     h, w, _ = table_img.shape
     
     min_x = max(0, mouse_table_x - search_radius)
@@ -212,7 +212,6 @@ def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y,
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
     
-    # تحديث بارامترات الـ HoughCircles للبحث عن كرات بأحجامها الكبيرة الواقعية
     circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=40, param1=50, param2=14, minRadius=20, maxRadius=38)
     
     if circles is not None:
@@ -269,15 +268,19 @@ while running:
     gray = cv2.cvtColor(table, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
 
-    # 🚨 الأهم: تم تكبير minRadius و maxRadius و minDist لتتطابق تماماً مع الأبعاد الحقيقية في الصورة بدون Resize
     circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=45, param1=65, param2=20, minRadius=20, maxRadius=38)
 
     raw_white_det = None
     mx, my = win32api.GetCursorPos()
 
+    # 🎯 معايرة ديناميكية دقيقة للجيوب الستة بناءً على حواف الطاولة الحقيقية المكتشفة لمنع الانحراف
     pockets = [
-        (x + 35, y + 35), (x + w // 2, y + 20), (x + w - 35, y + 35),
-        (x + 35, y + h - 35), (x + w // 2, y + h - 20), (x + w - 35, y + h - 35)
+        (x + 18, y + 18),          # جيب علوي أيسر [1]
+        (x + w // 2, y + 10),      # جيب علوي أوسط [2]
+        (x + w - 18, y + 18),      # جيب علوي أيمن [3]
+        (x + 18, y + h - 18),      # جيب سفلي أيسر [4]
+        (x + w // 2, y + h - 10),  # جيب سفلي أوسط [5]
+        (x + w - 18, y + h - 18)   # جيب سفلي أيمن [6]
     ]
 
     top_band, bottom_band = y + CUSHION_PADDING, y + h - CUSHION_PADDING
@@ -344,6 +347,7 @@ while running:
         active_pocket = pockets[selected_pocket]
         g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
         
+        # رسم الخطوط الثلاثية المماسّة تماماً لسطح الكرة بدون انزياح
         draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
         pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
         pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
