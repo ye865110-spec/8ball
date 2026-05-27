@@ -43,23 +43,16 @@ CYAN = (0, 200, 255)
 # ==========================================
 # 🧠 3. Ultra-Stable Memory Systems
 # ==========================================
-class WhiteBallMemory:
+class PermanentWhiteBallMemory:
     def __init__(self):
-        self.last_known_pos = None
-        self.lost_frames = 0
-        self.max_lost_frames = 90  # زيادة وقت التذكر لثبات مطلق عند حركة العصا
+        self.last_valid_pos = None  # يحتفظ بآخر مكان صحيح للكرة البيضاء بشكل دائم
 
     def update(self, raw_white):
         if raw_white is not None:
-            self.last_known_pos = raw_white
-            self.lost_frames = 0
+            self.last_valid_pos = raw_white
             return raw_white
-        else:
-            if self.last_known_pos is not None:
-                self.lost_frames += 1
-                if self.lost_frames <= self.max_lost_frames:
-                    return self.last_known_pos
-            return None
+        # إذا اختفت الكرة (بسبب العصا)، لا ترجع None بل ارجع آخر موقع تم رصده بنجاح
+        return self.last_valid_pos
 
 class TargetBallManager:
     def __init__(self):
@@ -76,7 +69,7 @@ class TargetBallManager:
         self.kf.H = np.array([[1., 0., 0., 0.],
                              [0., 1., 0., 0.]])
         self.kf.P *= 2.
-        self.kf.R *= 0.01  # تقليص التشويش تماماً لتثبيت النقطة المحددة بالماوس
+        self.kf.R *= 0.01  
         self.kf.Q *= 0.005
 
     def lock_new(self, x, y):
@@ -84,7 +77,7 @@ class TargetBallManager:
         self.init_kf(x, y)
 
     def update(self):
-        if self.kf is not None:
+        if self.kf is not None and self.locked_pos is not None:
             self.kf.predict()
             self.kf.update(np.array(self.locked_pos))
             return (float(self.kf.x[0]), float(self.kf.x[1]))
@@ -94,7 +87,7 @@ class TargetBallManager:
         self.locked_pos = None
         self.kf = None
 
-white_memory = WhiteBallMemory()
+white_memory = PermanentWhiteBallMemory()
 target_manager = TargetBallManager()
 
 selected_pocket = 0
@@ -116,23 +109,18 @@ def ghost_ball(target, pocket, radius):
     return (pocket[0] + dx * ratio, pocket[1] + dy * ratio)
 
 def draw_parallel_guidelines(surface, color, start, end, radius):
-    """رسم 3 خطوط متوازية تحاكي الخطوط الخضراء الاحترافية لعرض الكرة بالكامل"""
     dx = end[0] - start[0]
     dy = end[1] - start[1]
     dist = math.hypot(dx, dy)
     if dist == 0: return
 
-    # حساب المتجه العمودي لعمل إزاحة يميناً ويساراً بعرض نصف قطر الكرة
     ux = dx / dist
     uy = dy / dist
     nx = -uy * radius
     ny = ux * radius
 
-    # الخط المركزي
     pygame.draw.line(surface, color, (int(start[0]), int(start[1])), (int(end[0]), int(end[1])), 1)
-    # الخط الأيمن
     pygame.draw.line(surface, color, (int(start[0] + nx), int(start[1] + ny)), (int(end[0] + nx), int(end[1] + ny)), 1)
-    # الخط الأيسر
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
 def calculate_multi_bank(start_pos, target_pos, bounds, max_banks=MAX_BANKS):
@@ -167,7 +155,7 @@ def calculate_multi_bank(start_pos, target_pos, bounds, max_banks=MAX_BANKS):
     return path
 
 # ==========================================
-# 🖼️ 5. Strict White Ball Filter
+# 🖼️ 5. Strict White Ball Filter (Edge & Hue Analysis)
 # ==========================================
 def detect_table(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -183,25 +171,35 @@ def detect_table(frame):
     return None
 
 def is_strictly_white_ball(roi):
-    """ فحص صارم يمنع الالتباس بالكرات المخططة أو رقم 9 """
+    """ فحص فائق الصرامة يعتمد على غياب الحواف الداخلية (No Numbers/Stripes) """
     if roi is None or roi.size == 0: return False
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     
-    # فلتر اللون الأبيض المخصص للكرة البيضاء فقط
-    lower_white = np.array([0, 0, 180]) 
+    # تحويل الصورة إلى رمادي لحساب الحواف والخطوط الداخلية
+    gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    h, w = gray_roi.shape
+    
+    # 1. فحص الحواف عبر خوارزمية Canny لمنع التقاط الأرقام والخطوط الملونة
+    # الكرة البيضاء الملساء لن تولد أي حواف داخلية، عكس كرات الخطوط أو الأرقام السوداء
+    edges = cv2.Canny(gray_roi, 100, 200)
+    center_edges = edges[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
+    edge_pixels = np.sum(center_edges > 0)
+    
+    if edge_pixels > 8: # إذا تم العثور على حواف داخلية (كتابة أو خطوط ملونة)، فهي ليست الكرة البيضاء قطعاً!
+        return False
+
+    # 2. فحص اللون الأبيض الكلي ونقاء المركز
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    lower_white = np.array([0, 0, 175]) 
     upper_white = np.array([180, 50, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
     
-    # 1. فحص الكثافة الكلية للأبيض في الدائرة
     white_ratio = np.sum(mask == 255) / mask.size
-    if white_ratio < 0.55: return False # الكرة البيضاء نقية جداً لذا يجب أن تتخطى 55%
+    if white_ratio < 0.50: return False 
     
-    # 2. فحص مركز الدائرة (لمنع التقاط الكرات التي في منتصفها رقم أسود أو لون مائل)
-    h, w, _ = roi.shape
     center_roi = mask[int(h*0.35):int(h*0.65), int(w*0.35):int(w*0.65)]
     center_white_ratio = np.sum(center_roi == 255) / center_roi.size
     
-    return center_white_ratio > 0.90 # يجب أن يكون المركز أبيض خالص بنسبة 90% على الأقل
+    return center_white_ratio > 0.85
 
 # ==========================================
 # 🎮 6. Initialize DirectX Overlay & Pygame
@@ -246,11 +244,9 @@ while running:
     table = frame[y:y+h, x:x+w]
     if table.size == 0: continue
 
-    # تم إلغاء الـ Resize تماماً لضمان دقة مكانية 100% بدون انزياحات أو قفزات (No Scaling)
     gray = cv2.cvtColor(table, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
 
-    # البحث في الأبعاد الكاملة مباشرة
     circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=70, param2=22, minRadius=12, maxRadius=20)
 
     raw_white_det = None
@@ -270,8 +266,7 @@ while running:
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         for (cx, cy, r) in circles:
-            cx, cy = int(cx + x), int(cy + y) # الإحداثي حقيقي ومباشر الآن بدون ضرب في 2
-            
+            cx, cy = int(cx + x), int(cy + y) 
             if any(distance((cx, cy), p) < 40 for p in pockets): continue
 
             roi = table[max(0, cy-y-r):min(h, cy-y+r), max(0, cx-x-r):min(w, cx-x+r)]
@@ -279,13 +274,13 @@ while running:
                 raw_white_det = (cx, cy)
                 break 
 
+    # تحديث الذاكرة المستمرة الدائمة (الكرة لن تختفي برمجياً أبداً حتى لو حُجبت بالعصا)
     stable_white = white_memory.update(raw_white_det)
 
     if stable_white:
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS, WHITE)
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS - 2, CYAN)
 
-    # قفل وتعديل مكان هدف يدوي بدقة 100%
     if keyboard.is_pressed("z") and time.time() - last_lock_time > 0.15:
         target_manager.lock_new(mx, my)
         last_lock_time = time.time()
@@ -310,20 +305,16 @@ while running:
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
     # ==========================================
-    # 🎯 8. 3-Line Professional Ray-Trace Engine
+    # 🎯 8. Independent Persistent Ray-Trace Engine
     # ==========================================
+    # الحسابات والرسم تعمل الآن بشكل مستمر بالاعتماد على إحداثيات الذاكرة الثابتة
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
-
         g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
         
-        # 1. رسم الثلاث خطوط المتوازية الاحترافية للكرة البيضاء تحاكي لقطتك الأولى
+        # رسم الخطوط الثلاثية المتوازية بثبات لا ينقطع
         draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
-        
-        # رسم الـ Ghost Ball بدقة منطبقة
         pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
-        
-        # 2. رسم خط الخروج للبوكيت من مركز الكرة الهدف
         pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
 
         if keyboard.is_pressed("i") or keyboard.is_pressed("m") or keyboard.is_pressed("j") or keyboard.is_pressed("k"):
