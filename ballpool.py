@@ -123,47 +123,45 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
 def calculate_single_bank_point(target, pocket, bounds):
-    """ حساب نقطة الارتداد المثالية على الباند بناءً على قانون انعكاس الضوء الفيزيائي """
+    """ حساب فيزيائي دقيق لنقطة ارتداد مفردة نظيفة تعتمد على ارتداد الجدار المستقيم التماثلي """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
 
-    # سنقوم بحساب الانعكاس على الأربع جدران ونختار المسار الأقصر والمنطقي
     candidates = []
 
-    # 1. ارتداد من الباند العلوي (Top)
-    # نقوم بعمل مرآة تخيلية للبوكيت حول الباند العلوي
+    # حساب جدار الارتداد الأقرب منطقياً لمسار الكرة والبوكيت لمنع خطوط الزجزاج العشوائية
+    # 1. الباند العلوي (إذا كان البوكيت والكرة في النصف العلوي)
     mirrored_py = top - (py - top)
-    # حساب نقطة التقاطع X على الباند
     if (mirrored_py - ty) != 0:
         bx = tx + (px - tx) * (top - ty) / (mirrored_py - ty)
         if left <= bx <= right:
-            candidates.append(((bx, top), distance(target, (bx, top)) + distance((bx, top), pocket)))
+            candidates.append((bx, top))
 
-    # 2. ارتداد من الباند السفلي (Bottom)
+    # 2. الباند السفلي
     mirrored_py = bottom + (bottom - py)
     if (mirrored_py - ty) != 0:
         bx = tx + (px - tx) * (bottom - ty) / (mirrored_py - ty)
         if left <= bx <= right:
-            candidates.append(((bx, bottom), distance(target, (bx, bottom)) + distance((bx, bottom), pocket)))
+            candidates.append((bx, bottom))
 
-    # 3. ارتداد من الباند الأيسر (Left)
+    # 3. الباند الأيسر
     mirrored_px = left - (px - left)
     if (mirrored_px - tx) != 0:
         by = ty + (py - ty) * (left - tx) / (mirrored_px - tx)
         if top <= by <= bottom:
-            candidates.append(((left, by), distance(target, (left, by)) + distance((left, by), pocket)))
+            candidates.append((left, by))
 
-    # 4. ارتداد من الباند الأيمن (Right)
+    # 4. الباند الأيمن
     mirrored_px = right + (right - px)
     if (mirrored_px - tx) != 0:
         by = ty + (py - ty) * (right - tx) / (mirrored_px - tx)
         if top <= by <= bottom:
-            candidates.append(((right, by), distance(target, (right, by)) + distance((right, by), pocket)))
+            candidates.append((right, by))
 
-    # اختيار أفضل نقطة ارتداد (أقصر مسار فيزيائي حقيقي)
+    # نختار الجدار الأقرب لموقع الكرة المستهدفة لضمان واقعية الضربة
     if candidates:
-        best_point = min(candidates, key=lambda item: item[1])[0]
+        best_point = min(candidates, key=lambda pt: distance(target, pt))
         return best_point
     return None
 
@@ -383,38 +381,42 @@ while running:
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
         
-        # 🌟 ميزة الارتداد التلقائي الجديدة: حساب نقطة الاصطدام المثالية على الباند العاكس
-        bank_point = calculate_single_bank_point(stable_target, active_pocket, table_bounds)
-        
-        if bank_point:
-            # حساب الكرة التخيلية (Ghost Ball) بناءً على نقطة الباند بدلاً من البوكيت المباشر
-            g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
-            
-            # 1. رسم خطوط المحاذاة الثلاثية المتوازية من الكرة البيضاء إلى الـ Ghost Ball
-            draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
-            pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
-            
-            # 2. رسم مسار حركة الكرة المستهدفة: من موقعها الحالي إلى الباند العاكس (خط أصفر مستمر)
-            pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
-            
-            # 3. رسم مسار الارتداد الثاني: من الباند العاكس مباشرة إلى البوكيت المختار (خط وردي فسفوري دقيق)
-            pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
-            pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
-        else:
-            # حل احتياطي في حال فشل حساب الباند لأي سبب، يرسم الخط المباشر القديم
+        # 🌟 إصلاح جذري: إذا كان المستخدم يضغط على الأزرار المخصصة للمسار المتعدد (Multi-Bank)
+        if keyboard.is_pressed("i") or keyboard.is_pressed("m") or keyboard.is_pressed("j") or keyboard.is_pressed("k"):
             g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
             draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
             pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
-            pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
-
-        # الاحتفاظ بالنظام المتعدد القديم (Multi-Bank) في حال الضغط على أزرار التحكم الاختيارية
-        if keyboard.is_pressed("i") or keyboard.is_pressed("m") or keyboard.is_pressed("j") or keyboard.is_pressed("k"):
+            
             bank_nodes = calculate_multi_bank(g_pos, active_pocket, table_bounds, max_banks=MAX_BANKS)
             for step in range(len(bank_nodes) - 1):
-                p_start = (int(bank_nodes[step][0]), int(bank_nodes[step][1]))
+                p_start = (int(bank_nodes[step][0]), int(bank_nodes[step+1][1]))
                 p_end = (int(bank_nodes[step+1][0]), int(bank_nodes[step+1][1]))
                 pygame.draw.line(screen, PINK, p_start, p_end, 2)
                 pygame.gfxdraw.filled_circle(screen, p_end[0], p_end[1], 4, CYAN)
+        else:
+            # 🟢 الوضع الافتراضي الذكي: رسم مسار ارتداد مفرد (Single Bank Shot) نظيف جداً وصحيح فيزيائياً
+            bank_point = calculate_single_bank_point(stable_target, active_pocket, table_bounds)
+            
+            if bank_point:
+                # الـ Ghost ball يجب أن توضع في زاوية التماس الصحيحة مع نقطة الارتداد على الباند وليس البوكيت مباشرة!
+                g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
+                
+                # 1. خطوط المحاذاة الثلاثية من الكرة البيضاء إلى الـ Ghost Ball الموزونة
+                draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
+                pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
+                
+                # 2. خط من الكرة المستهدفة إلى الباند العاكس مباشرة (الأصفر)
+                pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
+                
+                # 3. خط من الباند العاكس إلى البوكيت المختار (الوردي الفسفوري)
+                pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
+                pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
+            else:
+                # حل احتياطي إذا تعذر حساب نقطة الارتداد (الخط المباشر)
+                g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
+                draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
+                pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
+                pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
 
     pygame.display.update()
 
