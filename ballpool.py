@@ -45,13 +45,12 @@ CYAN = (0, 200, 255)
 # ==========================================
 class PermanentWhiteBallMemory:
     def __init__(self):
-        self.last_valid_pos = None  # يحتفظ بآخر مكان صحيح للكرة البيضاء بشكل دائم
+        self.last_valid_pos = None  
 
     def update(self, raw_white):
         if raw_white is not None:
             self.last_valid_pos = raw_white
             return raw_white
-        # إذا اختفت الكرة (بسبب العصا)، لا ترجع None بل ارجع آخر موقع تم رصده بنجاح
         return self.last_valid_pos
 
 class TargetBallManager:
@@ -155,7 +154,7 @@ def calculate_multi_bank(start_pos, target_pos, bounds, max_banks=MAX_BANKS):
     return path
 
 # ==========================================
-# 🖼️ 5. Strict White Ball Filter (Edge & Hue Analysis)
+# 🖼️ 5. Strict Filters & Snapping Engine
 # ==========================================
 def detect_table(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -171,23 +170,18 @@ def detect_table(frame):
     return None
 
 def is_strictly_white_ball(roi):
-    """ فحص فائق الصرامة يعتمد على غياب الحواف الداخلية (No Numbers/Stripes) """
     if roi is None or roi.size == 0: return False
     
-    # تحويل الصورة إلى رمادي لحساب الحواف والخطوط الداخلية
     gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     h, w = gray_roi.shape
     
-    # 1. فحص الحواف عبر خوارزمية Canny لمنع التقاط الأرقام والخطوط الملونة
-    # الكرة البيضاء الملساء لن تولد أي حواف داخلية، عكس كرات الخطوط أو الأرقام السوداء
     edges = cv2.Canny(gray_roi, 100, 200)
     center_edges = edges[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
     edge_pixels = np.sum(center_edges > 0)
     
-    if edge_pixels > 8: # إذا تم العثور على حواف داخلية (كتابة أو خطوط ملونة)، فهي ليست الكرة البيضاء قطعاً!
+    if edge_pixels > 8: 
         return False
 
-    # 2. فحص اللون الأبيض الكلي ونقاء المركز
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     lower_white = np.array([0, 0, 175]) 
     upper_white = np.array([180, 50, 255])
@@ -200,6 +194,36 @@ def is_strictly_white_ball(roi):
     center_white_ratio = np.sum(center_roi == 255) / center_roi.size
     
     return center_white_ratio > 0.85
+
+def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y, search_radius=25):
+    """ ميزة المغناطيس الرقمي: تبحث حول موقع الماوس عن المركز الهندسي الحقيقي لأي كرة """
+    h, w, _ = table_img.shape
+    
+    # تحديد منطقة فحص صغيرة جداً حول الماوس (ROI)
+    min_x = max(0, mouse_table_x - search_radius)
+    max_x = min(w, mouse_table_x + search_radius)
+    min_y = max(0, mouse_table_y - search_radius)
+    max_y = min(h, mouse_table_y + search_radius)
+    
+    roi = table_img[min_y:max_y, min_x:max_x]
+    if roi.size == 0: return None
+    
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
+    
+    # البحث عن أي دائرة قريبة جداً من مؤشر الماوس
+    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=50, param2=15, minRadius=12, maxRadius=20)
+    
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        # اختيار الدائرة الأقرب لمركز الـ ROI (أي الأقرب للماوس بالظبط)
+        best_circle = min(circles, key=lambda c: math.hypot(c[0] - search_radius, c[1] - search_radius))
+        cx, cy, _ = best_circle
+        
+        # إعادة الإحداثيات الحقيقية منسوبة للطاولة
+        return (min_x + cx, min_y + cy)
+    
+    return None
 
 # ==========================================
 # 🎮 6. Initialize DirectX Overlay & Pygame
@@ -274,15 +298,30 @@ while running:
                 raw_white_det = (cx, cy)
                 break 
 
-    # تحديث الذاكرة المستمرة الدائمة (الكرة لن تختفي برمجياً أبداً حتى لو حُجبت بالعصا)
     stable_white = white_memory.update(raw_white_det)
 
     if stable_white:
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS, WHITE)
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS - 2, CYAN)
 
+    # 🎯 تفعيل محرك الـ Auto-Snap عند الضغط على Z
     if keyboard.is_pressed("z") and time.time() - last_lock_time > 0.15:
-        target_manager.lock_new(mx, my)
+        # تحويل إحداثيات الماوس الحقيقية لتتوافق مع إحداثيات الطاولة الداخلية
+        mouse_table_x = mx - x
+        mouse_table_y = my - y
+        
+        # البحث عن المركز الدقيق لأقرب كرة في محيط الماوس
+        precise_center = find_precise_ball_center_near_mouse(table, mouse_table_x, mouse_table_y)
+        
+        if precise_center is not None:
+            # إذا وجد كرة قريبة، يقوم بجذب القفل للمركز الحقيقي بالملّي!
+            snap_x = int(precise_center[0] + x)
+            snap_y = int(precise_center[1] + y)
+            target_manager.lock_new(snap_x, snap_y)
+        else:
+            # خيار احتياطي لو ضغطت في منطقة فارغة تماماً بدون كرات
+            target_manager.lock_new(mx, my)
+            
         last_lock_time = time.time()
 
     if keyboard.is_pressed("x"):
@@ -307,12 +346,10 @@ while running:
     # ==========================================
     # 🎯 8. Independent Persistent Ray-Trace Engine
     # ==========================================
-    # الحسابات والرسم تعمل الآن بشكل مستمر بالاعتماد على إحداثيات الذاكرة الثابتة
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
         g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
         
-        # رسم الخطوط الثلاثية المتوازية بثبات لا ينقطع
         draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
         pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
         pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
