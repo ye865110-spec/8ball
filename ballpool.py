@@ -22,7 +22,7 @@ cv2.setNumThreads(4)
 # ⚙️ 2. Configuration & Hyperparameters
 # ==========================================
 FPS = 144
-BALL_RADIUS = 16  # المقاس المعتمد والمثالي
+BALL_RADIUS = 16  # المقاس المعتمد والمثالي الثابت
 CUSHION_PADDING = 16
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
@@ -38,9 +38,9 @@ BLUE = (0, 162, 232)
 PINK = (255, 0, 128)
 ORANGE = (255, 165, 0)
 CYAN = (0, 200, 255)
-GUI_BG = (30, 30, 35)      # لون خلفية القائمة
-GUI_TEXT = (240, 240, 240)  # لون نصوص القائمة
-GUI_BTN = (200, 50, 50)     # لون زر الخروج الأحمر
+GUI_BG = (30, 30, 35)      
+GUI_TEXT = (240, 240, 240)  
+GUI_BTN = (200, 50, 50)     
 
 last_known_mx = SCREEN_WIDTH // 2
 last_known_my = SCREEN_HEIGHT // 2
@@ -48,13 +48,13 @@ last_known_my = SCREEN_HEIGHT // 2
 # ==========================================
 # 🎛️ 3. GUI Menu State (إعدادات القائمة العائمة)
 # ==========================================
-gui_x, gui_y = 50, 50       # الموقع الابتدائي للقائمة على الشاشة
-gui_w, gui_h = 160, 95       # أبعاد القائمة الجانبية الصغيرة
-is_dragging = False          # حالة سحب وتحريك القائمة
+gui_x, gui_y = 50, 50       
+gui_w, gui_h = 160, 95       
+is_dragging = False          
 drag_offset_x = 0
 drag_offset_y = 0
 is_mouse_hovering_gui = False
-window_has_focus = True     # لمراقبة تفعيل الضغط بالماوس
+window_has_focus = True     
 
 # ==========================================
 # 🧠 4. Ultra-Stable Memory Systems
@@ -143,30 +143,44 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
 def calculate_manual_bank_point(target, pocket, bounds, side):
+    """ 
+    🔥 تعديل فيزيائي حقيقي: تشفيت الجدران للداخل بمقدار BALL_RADIUS (16 بكسل)
+    لأن التصادم الفعلي يحدث بحافة الكرة وليس بمركزها.
+    """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
 
+    # تشفيت الحدود افتراضياً للداخل لمطابقة موقع مركز الكرة لحظة ملامسة الحافة للباند
+    adjusted_top = top + BALL_RADIUS
+    adjusted_bottom = bottom - BALL_RADIUS
+    adjusted_left = left + BALL_RADIUS
+    adjusted_right = right - BALL_RADIUS
+
     if side == 'top':
-        mirrored_py = top - (py - top)
+        mirrored_py = adjusted_top - (py - adjusted_top)
         if (mirrored_py - ty) != 0:
-            bx = tx + (px - tx) * (top - ty) / (mirrored_py - ty)
-            if left <= bx <= right: return (bx, top)
+            bx = tx + (px - tx) * (adjusted_top - ty) / (mirrored_py - ty)
+            if left <= bx <= right: return (bx, top) # الإرجاع على جدار الرسم الأصلي
+            
     elif side == 'bottom':
-        mirrored_py = bottom + (bottom - py)
+        mirrored_py = adjusted_bottom + (adjusted_bottom - py)
         if (mirrored_py - ty) != 0:
-            bx = tx + (px - tx) * (bottom - ty) / (mirrored_py - ty)
+            bx = tx + (px - tx) * (adjusted_bottom - ty) / (mirrored_py - ty)
             if left <= bx <= right: return (bx, bottom)
+            
     elif side == 'left':
-        mirrored_px = left - (px - left)
+        mirrored_px = adjusted_left - (px - adjusted_left)
         if (mirrored_px - tx) != 0:
-            by = ty + (py - ty) * (left - tx) / (mirrored_px - tx)
+            by = ty + (py - ty) * (adjusted_left - tx) / (mirrored_px - tx)
             if top <= by <= bottom: return (left, by)
+            
     elif side == 'right':
-        mirrored_px = right + (right - px)
+        mirrored_px = adjusted_right + (adjusted_right - px)
         if (mirrored_px - tx) != 0:
-            by = ty + (py - ty) * (right - tx) / (mirrored_px - tx)
+            by = ty + (py - ty) * (adjusted_right - tx) / (mirrored_px - tx)
             if top <= by <= bottom: return (right, by)
+            
     return None
 
 # ==========================================
@@ -227,8 +241,6 @@ def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y,
 # ==========================================
 pygame.init()
 pygame.font.init()
-
-# إبقاء مؤشر الماوس ظاهراً لكي نتحكم في القائمة بسهولة
 pygame.mouse.set_visible(True)
 
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME)
@@ -260,10 +272,8 @@ while running:
     except Exception:
         mx, my = last_known_mx, last_known_my
 
-    # الفحص: هل الماوس داخل حدود القائمة العائمة؟
     is_mouse_hovering_gui = (gui_x <= mx <= gui_x + gui_w) and (gui_y <= my <= gui_y + gui_h)
 
-    # تفعيل الماوس فقط عندما يقف المستخدم على القائمة، لكي لا يعيق اللعب بالماوس داخل الطاولة
     if is_mouse_hovering_gui and not window_has_focus:
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST)
         window_has_focus = True
@@ -272,15 +282,12 @@ while running:
         window_has_focus = False
         is_dragging = False
 
-    # التعامل مع أحداث الضغط بالماوس داخل القائمة العائمة
     for event in pygame.event.get():
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if is_mouse_hovering_gui:
-                # التحقق إذا ضغط على زر الخروج (Exit Button) الإحداثيات نسبية داخل القائمة
                 if (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 50 <= my <= gui_y + 85):
                     running = False
                 else:
-                    # بدء سحب القائمة بالماوس لتغيير مكانها
                     is_dragging = True
                     drag_offset_x = mx - gui_x
                     drag_offset_y = my - gui_y
@@ -323,7 +330,6 @@ while running:
 
     screen.fill(TRANSPARENT)
 
-    # 1. التتبع التلقائي العادي للكرة البيضاء
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         for (cx, cy, r) in circles:
@@ -335,7 +341,6 @@ while running:
                 raw_white_det = (cx, cy)
                 break 
 
-    # 🌟 ميزة المغناطيس اليدوي المضافة للكرة البيضاء عند الضغط على حرف A
     if keyboard.is_pressed("a") and time.time() - last_white_lock_time > 0.15:
         mouse_table_x = mx - x
         mouse_table_y = my - y
@@ -353,7 +358,6 @@ while running:
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS, WHITE)
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS - 2, CYAN)
 
-    # تحديد الكرة المستهدفة عند الضغط على Z
     if keyboard.is_pressed("z") and time.time() - last_lock_time > 0.15:
         mouse_table_x = mx - x
         mouse_table_y = my - y
@@ -384,7 +388,9 @@ while running:
         txt = pocket_font.render(f"{idx+1}", True, WHITE if idx == selected_pocket else ORANGE)
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
-    # محرك الرصد المباشر (ستريت وباند يدوي)
+    # ==========================================
+    # 🎯 9. Precision Ray-Trace Engine (Straight & Manual Bank)
+    # ==========================================
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
         
@@ -395,11 +401,13 @@ while running:
         elif keyboard.is_pressed("k"): chosen_side = 'right'
 
         if chosen_side:
+            # الحساب الدقيق بناءً على الجدران المشفتة للحافة الفوق فيزيائية
             bank_point = calculate_manual_bank_point(stable_target, active_pocket, table_bounds, chosen_side)
             if bank_point:
                 g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
+                
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
                 pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
                 pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
@@ -415,21 +423,18 @@ while running:
             pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
 
     # ==========================================
-    # 🖼️ 9. Rendering The Floating GUI Menu
+    # 🖼️ 10. Rendering The Floating GUI Menu
     # ==========================================
-    # الخلفية الرئيسية للقائمة (مستطيل داكن بزوايا حادة متناسق مع الألعاب)
     pygame.draw.rect(screen, GUI_BG, (gui_x, gui_y, gui_w, gui_h))
-    pygame.draw.rect(screen, CYAN, (gui_x, gui_y, gui_w, gui_h), 1)  # إطار فسفوري رفيع جذاب
-    pygame.draw.line(screen, CYAN, (gui_x, gui_y + 25), (gui_x + gui_w, gui_y + 25), 1) # خط فاصل للعنوان
+    pygame.draw.rect(screen, CYAN, (gui_x, gui_y, gui_w, gui_h), 1)  
+    pygame.draw.line(screen, CYAN, (gui_x, gui_y + 25), (gui_x + gui_w, gui_y + 25), 1) 
 
-    # النصوص والعناوين داخل القائمة
     title_txt = gui_title_font.render("🎱 Billiards Tool Panel", True, CYAN)
     screen.blit(title_txt, (gui_x + 12, gui_y + 4))
 
     info_txt = gui_title_font.render("Drag me anywhere", True, ORANGE)
     screen.blit(info_txt, (gui_x + 35, gui_y + 28))
 
-    # رسم زر الخروج المستطيل (Exit Button)
     pygame.draw.rect(screen, GUI_BTN, (gui_x + 15, gui_y + 50, gui_w - 30, 32))
     pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 50, gui_w - 30, 32), 1)
     
