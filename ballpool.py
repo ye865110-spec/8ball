@@ -41,22 +41,27 @@ CYAN = (0, 200, 255)
 GUI_BG = (30, 30, 35)      
 GUI_TEXT = (240, 240, 240)  
 GUI_BTN = (200, 50, 50)     
-GUI_HIDE_BTN = (50, 150, 50) # لون أخضر لزر الإخفاء
+GUI_HIDE_BTN = (50, 150, 50) 
+GUI_ACTIVE_COLOR = (0, 162, 232) # اللون الأزرق للإشارة إلى القوة النشطة حالياً
 
 last_known_mx = SCREEN_WIDTH // 2
 last_known_my = SCREEN_HEIGHT // 2
 
 # ==========================================
-# 🎛️ 3. GUI Menu State
+# 🎛️ 3. GUI Menu State (مطور ليشمل القوى واختياراتها)
 # ==========================================
 gui_x, gui_y = 50, 50       
-gui_w, gui_h = 160, 135       # زيادة الارتفاع قليلاً ليتسع للزر الجديد
+gui_w, gui_h = 160, 185       # زيادة الارتفاع ليتسع لأزرار القوة الجديدة ومؤشرها
 is_dragging = False          
 drag_offset_x = 0
 drag_offset_y = 0
 is_mouse_hovering_gui = False
 window_has_focus = True     
-is_hidden = False             # متغير جديد لمتابعة حالة إخفاء البرنامج
+is_hidden = False             
+
+# 🕹️ متغيرات نظام القوة الفيزيائي الجديد
+current_power = 50            # القوة الافتراضية الابتدائية (50%)
+CUSHION_DEFORMATION = 6       # معامل غوص الكرة بالبكسل داخل المطاط عند ضربة الـ Max Power (100%)
 
 # ==========================================
 # 🧠 4. Ultra-Stable Memory Systems
@@ -115,6 +120,7 @@ table_region = None
 last_lock_time = 0
 last_white_lock_time = 0
 last_hide_toggle_time = 0
+last_power_toggle_time = 0
 
 # ==========================================
 # 📐 5. Advanced Math & Physical Reflections
@@ -145,15 +151,27 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
     pygame.draw.line(surface, color, (int(start[0] + nx), int(start[1] + ny)), (int(end[0] + nx), int(end[1] + ny)), 1)
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
-def calculate_manual_bank_point(target, pocket, bounds, side):
+def calculate_manual_bank_point(target, pocket, bounds, side, power):
+    """ 
+    🧠 دالة الباند الفيزيائية المحدثة: تدمج حافة الكرة + قوة الضربة المختارة مسبقاً
+    القوة 100% تقوم بتشوية افتراضي في الجدار للخارج مما يمنحك زاوية خروج أوسع (Shorten Bank).
+    """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
 
+    # الحساب الأساسي القائم على حافة ملامسة مركز الكرة (القوة 50)
     adjusted_top = top + BALL_RADIUS
     adjusted_bottom = bottom - BALL_RADIUS
     adjusted_left = left + BALL_RADIUS
     adjusted_right = right - BALL_RADIUS
+
+    # 🕹️ إذا كانت القوة 100%، نزحف بالجدار للاستجابة لانضغاط المطاط لتوسيع الزاوية
+    if power == 100:
+        adjusted_top -= CUSHION_DEFORMATION
+        adjusted_bottom += CUSHION_DEFORMATION
+        adjusted_left -= CUSHION_DEFORMATION
+        adjusted_right += CUSHION_DEFORMATION
 
     if side == 'top':
         mirrored_py = adjusted_top - (py - adjusted_top)
@@ -249,7 +267,7 @@ camera.start(target_fps=FPS, video_mode=True)
 clock = pygame.time.Clock()
 
 pocket_font = pygame.font.SysFont("Arial", 16, bold=True)
-gui_font = pygame.font.SysFont("Segoe UI", 13, bold=True)
+gui_font = pygame.font.SysFont("Segoe UI", 12, bold=True)
 gui_title_font = pygame.font.SysFont("Segoe UI", 11)
 
 running = True
@@ -266,18 +284,24 @@ while running:
     except Exception:
         mx, my = last_known_mx, last_known_my
 
-    # التحكم في اختصار إظهار البرنامج من الكيبورد إذا كان مخفياً
+    # 🕹️ مراقبة اختصارات الكيبورد السريعة لتغيير القوة مسبقاً قبل الضربة
+    if keyboard.is_pressed("f3") and time.time() - last_power_toggle_time > 0.2:
+        current_power = 50
+        last_power_toggle_time = time.time()
+    elif keyboard.is_pressed("f4") and time.time() - last_power_toggle_time > 0.2:
+        current_power = 100
+        last_power_toggle_time = time.time()
+
+    # التحكم في اختصار إخفاء البرنامج
     if keyboard.is_pressed("ctrl+h") and time.time() - last_hide_toggle_time > 0.3:
         is_hidden = not is_hidden
         last_hide_toggle_time = time.time()
 
-    # فحص موضع الماوس بالنسبة للقائمة (فقط لو لم تكن مخفية)
     if not is_hidden:
         is_mouse_hovering_gui = (gui_x <= mx <= gui_x + gui_w) and (gui_y <= my <= gui_y + gui_h)
     else:
         is_mouse_hovering_gui = False
 
-    # تفعيل حركة اللمس فوق القائمة العائمة
     if is_mouse_hovering_gui and not window_has_focus:
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST)
         window_has_focus = True
@@ -289,12 +313,18 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if is_mouse_hovering_gui:
-                # 1. زر الإخفاء المؤقت (الموقع الجديد)
-                if (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 50 <= my <= gui_y + 82):
+                # أ) الضغط على زر اختيار قوة 50%
+                if (gui_x + 15 <= mx <= gui_x + 75) and (gui_y + 45 <= my <= gui_y + 75):
+                    current_power = 50
+                # ب) الضغط على زر اختيار قوة 100%
+                elif (gui_x + 85 <= mx <= gui_x + 145) and (gui_y + 45 <= my <= gui_y + 75):
+                    current_power = 100
+                # ج) زر الإخفاء المؤقت (تم ترحيل مواقعه لأسفل بسبب أزرار القوة)
+                elif (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 95 <= my <= gui_y + 127):
                     is_hidden = True
                     last_hide_toggle_time = time.time()
-                # 2. زر الإغلاق النهائي
-                elif (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 90 <= my <= gui_y + 122):
+                # د) زر الإغلاق النهائي
+                elif (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 135 <= my <= gui_y + 167):
                     running = False
                 else:
                     is_dragging = True
@@ -311,16 +341,14 @@ while running:
 
     win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
 
-    # تنظيف الشاشة بالكامل
     screen.fill(TRANSPARENT)
 
-    # 🔴 إذا كان البرنامج مخفياً، نعمل تخطي (Skip) لكل حسابات الرسم ونعرض الشاشة فارغة تماماً
     if is_hidden:
         pygame.display.update()
         continue
 
     # ==========================================
-    # 🎱 الحسابات والرصد العادي داخل اللعبة
+    # 🎱 Screen Capture & Core Game Analysis
     # ==========================================
     frame = camera.get_latest_frame()
     if frame is None: continue
@@ -404,6 +432,9 @@ while running:
         txt = pocket_font.render(f"{idx+1}", True, WHITE if idx == selected_pocket else ORANGE)
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
+    # ==========================================
+    # 🎯 9. Advanced Ray-Trace Engine with Power Compensation
+    # ==========================================
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
         chosen_side = None
@@ -413,11 +444,13 @@ while running:
         elif keyboard.is_pressed("k"): chosen_side = 'right'
 
         if chosen_side:
-            bank_point = calculate_manual_bank_point(stable_target, active_pocket, table_bounds, chosen_side)
+            # تمرير القوة المختارة الحالية للدالة لحساب الارتداد بناءً على شدة انضغاط الباند
+            bank_point = calculate_manual_bank_point(stable_target, active_pocket, table_bounds, chosen_side, current_power)
             if bank_point:
                 g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
+                
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
                 pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
                 pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
@@ -433,7 +466,7 @@ while running:
             pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
 
     # ==========================================
-    # 🖼️ 10. Rendering The Floating GUI Menu
+    # 🖼️ 10. Rendering The Matured Floating GUI Menu
     # ==========================================
     pygame.draw.rect(screen, GUI_BG, (gui_x, gui_y, gui_w, gui_h))
     pygame.draw.rect(screen, CYAN, (gui_x, gui_y, gui_w, gui_h), 1)  
@@ -442,20 +475,35 @@ while running:
     title_txt = gui_title_font.render("🎱 Billiards Tool Panel", True, CYAN)
     screen.blit(title_txt, (gui_x + 12, gui_y + 4))
 
-    info_txt = gui_title_font.render("Drag me anywhere", True, ORANGE)
-    screen.blit(info_txt, (gui_x + 35, gui_y + 28))
+    # 🕹️ رسم أزرار تعيين القوة المسبقة تزامناً مع الكيبورد والقائمة
+    power_lbl = gui_title_font.render(f"Target Power: {current_power}%", True, ORANGE)
+    screen.blit(power_lbl, (gui_x + 15, gui_y + 28))
 
-    # 🟢 الزر الأول: زر الإخفاء المؤقت (HIDE TOOL)
-    pygame.draw.rect(screen, GUI_HIDE_BTN, (gui_x + 15, gui_y + 50, gui_w - 30, 32))
-    pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 50, gui_w - 30, 32), 1)
+    # زر 50% (F3)
+    p50_color = GUI_ACTIVE_COLOR if current_power == 50 else (60, 60, 65)
+    pygame.draw.rect(screen, p50_color, (gui_x + 15, gui_y + 45, 60, 30))
+    pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 45, 60, 30), 1)
+    p50_txt = gui_font.render("50% (F3)", True, WHITE)
+    screen.blit(p50_txt, (gui_x + 22, gui_y + 52))
+
+    # زر 100% (F4)
+    p100_color = GUI_ACTIVE_COLOR if current_power == 100 else (60, 60, 65)
+    pygame.draw.rect(screen, p100_color, (gui_x + 85, gui_y + 45, 60, 30))
+    pygame.draw.rect(screen, WHITE, (gui_x + 85, gui_y + 45, 60, 30), 1)
+    p100_txt = gui_font.render("100%(F4)", True, WHITE)
+    screen.blit(p100_txt, (gui_x + 91, gui_y + 52))
+
+    # زر الإخفاء المؤقت (HIDE TOOL)
+    pygame.draw.rect(screen, GUI_HIDE_BTN, (gui_x + 15, gui_y + 95, gui_w - 30, 32))
+    pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 95, gui_w - 30, 32), 1)
     hide_txt = gui_font.render("HIDE TOOL", True, WHITE)
-    screen.blit(hide_txt, (gui_x + 45, gui_y + 56))
+    screen.blit(hide_txt, (gui_x + 45, gui_y + 102))
 
-    # 🔴 الزر الثاني: زر الإغلاق النهائي (CLOSE TOOL)
-    pygame.draw.rect(screen, GUI_BTN, (gui_x + 15, gui_y + 90, gui_w - 30, 32))
-    pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 90, gui_w - 30, 32), 1)
+    # زر الإغلاق النهائي (CLOSE TOOL)
+    pygame.draw.rect(screen, GUI_BTN, (gui_x + 15, gui_y + 135, gui_w - 30, 32))
+    pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 135, gui_w - 30, 32), 1)
     exit_txt = gui_font.render("CLOSE TOOL", True, WHITE)
-    screen.blit(exit_txt, (gui_x + 38, gui_y + 96))
+    screen.blit(exit_txt, (gui_x + 38, gui_y + 142))
 
     pygame.display.update()
 
