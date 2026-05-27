@@ -22,7 +22,7 @@ cv2.setNumThreads(4)
 # ⚙️ 2. Configuration & Hyperparameters
 # ==========================================
 FPS = 144
-BALL_RADIUS = 16  # المقاس المعتمد والمثالي الثابت
+BALL_RADIUS = 16  
 CUSHION_PADDING = 16
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
@@ -41,20 +41,22 @@ CYAN = (0, 200, 255)
 GUI_BG = (30, 30, 35)      
 GUI_TEXT = (240, 240, 240)  
 GUI_BTN = (200, 50, 50)     
+GUI_HIDE_BTN = (50, 150, 50) # لون أخضر لزر الإخفاء
 
 last_known_mx = SCREEN_WIDTH // 2
 last_known_my = SCREEN_HEIGHT // 2
 
 # ==========================================
-# 🎛️ 3. GUI Menu State (إعدادات القائمة العائمة)
+# 🎛️ 3. GUI Menu State
 # ==========================================
 gui_x, gui_y = 50, 50       
-gui_w, gui_h = 160, 95       
+gui_w, gui_h = 160, 135       # زيادة الارتفاع قليلاً ليتسع للزر الجديد
 is_dragging = False          
 drag_offset_x = 0
 drag_offset_y = 0
 is_mouse_hovering_gui = False
 window_has_focus = True     
+is_hidden = False             # متغير جديد لمتابعة حالة إخفاء البرنامج
 
 # ==========================================
 # 🧠 4. Ultra-Stable Memory Systems
@@ -112,6 +114,7 @@ selected_pocket = 0
 table_region = None
 last_lock_time = 0
 last_white_lock_time = 0
+last_hide_toggle_time = 0
 
 # ==========================================
 # 📐 5. Advanced Math & Physical Reflections
@@ -143,15 +146,10 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
 def calculate_manual_bank_point(target, pocket, bounds, side):
-    """ 
-    🔥 تعديل فيزيائي حقيقي: تشفيت الجدران للداخل بمقدار BALL_RADIUS (16 بكسل)
-    لأن التصادم الفعلي يحدث بحافة الكرة وليس بمركزها.
-    """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
 
-    # تشفيت الحدود افتراضياً للداخل لمطابقة موقع مركز الكرة لحظة ملامسة الحافة للباند
     adjusted_top = top + BALL_RADIUS
     adjusted_bottom = bottom - BALL_RADIUS
     adjusted_left = left + BALL_RADIUS
@@ -161,26 +159,22 @@ def calculate_manual_bank_point(target, pocket, bounds, side):
         mirrored_py = adjusted_top - (py - adjusted_top)
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (adjusted_top - ty) / (mirrored_py - ty)
-            if left <= bx <= right: return (bx, top) # الإرجاع على جدار الرسم الأصلي
-            
+            if left <= bx <= right: return (bx, top)
     elif side == 'bottom':
         mirrored_py = adjusted_bottom + (adjusted_bottom - py)
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (adjusted_bottom - ty) / (mirrored_py - ty)
             if left <= bx <= right: return (bx, bottom)
-            
     elif side == 'left':
         mirrored_px = adjusted_left - (px - adjusted_left)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (adjusted_left - tx) / (mirrored_px - tx)
             if top <= by <= bottom: return (left, by)
-            
     elif side == 'right':
         mirrored_px = adjusted_right + (adjusted_right - px)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (adjusted_right - tx) / (mirrored_px - tx)
             if top <= by <= bottom: return (right, by)
-            
     return None
 
 # ==========================================
@@ -272,8 +266,18 @@ while running:
     except Exception:
         mx, my = last_known_mx, last_known_my
 
-    is_mouse_hovering_gui = (gui_x <= mx <= gui_x + gui_w) and (gui_y <= my <= gui_y + gui_h)
+    # التحكم في اختصار إظهار البرنامج من الكيبورد إذا كان مخفياً
+    if keyboard.is_pressed("ctrl+h") and time.time() - last_hide_toggle_time > 0.3:
+        is_hidden = not is_hidden
+        last_hide_toggle_time = time.time()
 
+    # فحص موضع الماوس بالنسبة للقائمة (فقط لو لم تكن مخفية)
+    if not is_hidden:
+        is_mouse_hovering_gui = (gui_x <= mx <= gui_x + gui_w) and (gui_y <= my <= gui_y + gui_h)
+    else:
+        is_mouse_hovering_gui = False
+
+    # تفعيل حركة اللمس فوق القائمة العائمة
     if is_mouse_hovering_gui and not window_has_focus:
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST)
         window_has_focus = True
@@ -285,7 +289,12 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if is_mouse_hovering_gui:
-                if (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 50 <= my <= gui_y + 85):
+                # 1. زر الإخفاء المؤقت (الموقع الجديد)
+                if (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 50 <= my <= gui_y + 82):
+                    is_hidden = True
+                    last_hide_toggle_time = time.time()
+                # 2. زر الإغلاق النهائي
+                elif (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 90 <= my <= gui_y + 122):
                     running = False
                 else:
                     is_dragging = True
@@ -302,6 +311,17 @@ while running:
 
     win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
 
+    # تنظيف الشاشة بالكامل
+    screen.fill(TRANSPARENT)
+
+    # 🔴 إذا كان البرنامج مخفياً، نعمل تخطي (Skip) لكل حسابات الرسم ونعرض الشاشة فارغة تماماً
+    if is_hidden:
+        pygame.display.update()
+        continue
+
+    # ==========================================
+    # 🎱 الحسابات والرصد العادي داخل اللعبة
+    # ==========================================
     frame = camera.get_latest_frame()
     if frame is None: continue
 
@@ -328,8 +348,6 @@ while running:
     left_band, right_band = x + CUSHION_PADDING, x + w - CUSHION_PADDING
     table_bounds = (left_band, top_band, right_band, bottom_band)
 
-    screen.fill(TRANSPARENT)
-
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         for (cx, cy, r) in circles:
@@ -345,7 +363,6 @@ while running:
         mouse_table_x = mx - x
         mouse_table_y = my - y
         precise_white = find_precise_ball_center_near_mouse(table, mouse_table_x, mouse_table_y)
-        
         if precise_white is not None:
             white_memory.manual_lock(int(precise_white[0] + x), int(precise_white[1] + y))
         else:
@@ -362,7 +379,6 @@ while running:
         mouse_table_x = mx - x
         mouse_table_y = my - y
         precise_center = find_precise_ball_center_near_mouse(table, mouse_table_x, mouse_table_y)
-        
         if precise_center is not None:
             target_manager.lock_new(int(precise_center[0] + x), int(precise_center[1] + y))
         else:
@@ -388,12 +404,8 @@ while running:
         txt = pocket_font.render(f"{idx+1}", True, WHITE if idx == selected_pocket else ORANGE)
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
-    # ==========================================
-    # 🎯 9. Precision Ray-Trace Engine (Straight & Manual Bank)
-    # ==========================================
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
-        
         chosen_side = None
         if keyboard.is_pressed("i"): chosen_side = 'top'
         elif keyboard.is_pressed("m"): chosen_side = 'bottom'
@@ -401,13 +413,11 @@ while running:
         elif keyboard.is_pressed("k"): chosen_side = 'right'
 
         if chosen_side:
-            # الحساب الدقيق بناءً على الجدران المشفتة للحافة الفوق فيزيائية
             bank_point = calculate_manual_bank_point(stable_target, active_pocket, table_bounds, chosen_side)
             if bank_point:
                 g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
-                
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
                 pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
                 pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
@@ -435,11 +445,17 @@ while running:
     info_txt = gui_title_font.render("Drag me anywhere", True, ORANGE)
     screen.blit(info_txt, (gui_x + 35, gui_y + 28))
 
-    pygame.draw.rect(screen, GUI_BTN, (gui_x + 15, gui_y + 50, gui_w - 30, 32))
+    # 🟢 الزر الأول: زر الإخفاء المؤقت (HIDE TOOL)
+    pygame.draw.rect(screen, GUI_HIDE_BTN, (gui_x + 15, gui_y + 50, gui_w - 30, 32))
     pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 50, gui_w - 30, 32), 1)
-    
+    hide_txt = gui_font.render("HIDE TOOL", True, WHITE)
+    screen.blit(hide_txt, (gui_x + 45, gui_y + 56))
+
+    # 🔴 الزر الثاني: زر الإغلاق النهائي (CLOSE TOOL)
+    pygame.draw.rect(screen, GUI_BTN, (gui_x + 15, gui_y + 90, gui_w - 30, 32))
+    pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 90, gui_w - 30, 32), 1)
     exit_txt = gui_font.render("CLOSE TOOL", True, WHITE)
-    screen.blit(exit_txt, (gui_x + 38, gui_y + 56))
+    screen.blit(exit_txt, (gui_x + 38, gui_y + 96))
 
     pygame.display.update()
 
