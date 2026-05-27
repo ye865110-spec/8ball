@@ -22,7 +22,7 @@ cv2.setNumThreads(4)
 # ⚙️ 2. Configuration & Hyperparameters
 # ==========================================
 FPS = 144
-BALL_RADIUS = 16  # المقاس المعتمد والمثالي القديم
+BALL_RADIUS = 16  # المقاس المعتمد والمثالي
 CUSHION_PADDING = 16
 
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
@@ -38,9 +38,26 @@ BLUE = (0, 162, 232)
 PINK = (255, 0, 128)
 ORANGE = (255, 165, 0)
 CYAN = (0, 200, 255)
+GUI_BG = (30, 30, 35)      # لون خلفية القائمة
+GUI_TEXT = (240, 240, 240)  # لون نصوص القائمة
+GUI_BTN = (200, 50, 50)     # لون زر الخروج الأحمر
+
+last_known_mx = SCREEN_WIDTH // 2
+last_known_my = SCREEN_HEIGHT // 2
 
 # ==========================================
-# 🧠 3. Ultra-Stable Memory Systems
+# 🎛️ 3. GUI Menu State (إعدادات القائمة العائمة)
+# ==========================================
+gui_x, gui_y = 50, 50       # الموقع الابتدائي للقائمة على الشاشة
+gui_w, gui_h = 160, 95       # أبعاد القائمة الجانبية الصغيرة
+is_dragging = False          # حالة سحب وتحريك القائمة
+drag_offset_x = 0
+drag_offset_y = 0
+is_mouse_hovering_gui = False
+window_has_focus = True     # لمراقبة تفعيل الضغط بالماوس
+
+# ==========================================
+# 🧠 4. Ultra-Stable Memory Systems
 # ==========================================
 class PermanentWhiteBallMemory:
     def __init__(self):
@@ -51,6 +68,9 @@ class PermanentWhiteBallMemory:
             self.last_valid_pos = raw_white
             return raw_white
         return self.last_valid_pos
+        
+    def manual_lock(self, x, y):
+        self.last_valid_pos = (x, y)
 
 class TargetBallManager:
     def __init__(self):
@@ -91,9 +111,10 @@ target_manager = TargetBallManager()
 selected_pocket = 0
 table_region = None
 last_lock_time = 0
+last_white_lock_time = 0
 
 # ==========================================
-# 📐 4. Advanced Math & Physical Reflections
+# 📐 5. Advanced Math & Physical Reflections
 # ==========================================
 def distance(p1, p2):
     return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
@@ -122,7 +143,6 @@ def draw_parallel_guidelines(surface, color, start, end, radius):
     pygame.draw.line(surface, color, (int(start[0] - nx), int(start[1] - ny)), (int(end[0] - nx), int(end[1] - ny)), 1)
 
 def calculate_manual_bank_point(target, pocket, bounds, side):
-    """ حساب نقطة الارتداد الدقيقة بناءً على الباند المختار يدوياً عبر الحروف """
     left, top, right, bottom = bounds
     tx, ty = target
     px, py = pocket
@@ -132,29 +152,25 @@ def calculate_manual_bank_point(target, pocket, bounds, side):
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (top - ty) / (mirrored_py - ty)
             if left <= bx <= right: return (bx, top)
-            
     elif side == 'bottom':
         mirrored_py = bottom + (bottom - py)
         if (mirrored_py - ty) != 0:
             bx = tx + (px - tx) * (bottom - ty) / (mirrored_py - ty)
             if left <= bx <= right: return (bx, bottom)
-            
     elif side == 'left':
         mirrored_px = left - (px - left)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (left - tx) / (mirrored_px - tx)
             if top <= by <= bottom: return (left, by)
-            
     elif side == 'right':
         mirrored_px = right + (right - px)
         if (mirrored_px - tx) != 0:
             by = ty + (py - ty) * (right - tx) / (mirrored_px - tx)
             if top <= by <= bottom: return (right, by)
-            
     return None
 
 # ==========================================
-# 🖼️ 5. Strict Filters & Snapping Engine
+# 🖼️ 6. Strict Filters & Snapping Engine
 # ==========================================
 def detect_table(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -171,33 +187,23 @@ def detect_table(frame):
 
 def is_strictly_white_ball(roi):
     if roi is None or roi.size == 0: return False
-    
     gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     h, w = gray_roi.shape
-    
     edges = cv2.Canny(gray_roi, 100, 200)
     center_edges = edges[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
-    edge_pixels = np.sum(center_edges > 0)
-    
-    if edge_pixels > 8: 
-        return False
+    if np.sum(center_edges > 0) > 8: return False
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     lower_white = np.array([0, 0, 175]) 
     upper_white = np.array([180, 50, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
-    
-    white_ratio = np.sum(mask == 255) / mask.size
-    if white_ratio < 0.50: return False 
+    if (np.sum(mask == 255) / mask.size) < 0.50: return False 
     
     center_roi = mask[int(h*0.35):int(h*0.65), int(w*0.35):int(w*0.65)]
-    center_white_ratio = np.sum(center_roi == 255) / center_roi.size
-    
-    return center_white_ratio > 0.85
+    return (np.sum(center_roi == 255) / center_roi.size) > 0.85
 
 def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y, search_radius=25):
     h, w, _ = table_img.shape
-    
     min_x = max(0, mouse_table_x - search_radius)
     max_x = min(w, mouse_table_x + search_radius)
     min_y = max(0, mouse_table_y - search_radius)
@@ -208,23 +214,22 @@ def find_precise_ball_center_near_mouse(table_img, mouse_table_x, mouse_table_y,
     
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
-    
     circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=50, param2=15, minRadius=12, maxRadius=20)
     
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         best_circle = min(circles, key=lambda c: math.hypot(c[0] - search_radius, c[1] - search_radius))
-        cx, cy, _ = best_circle
-        return (min_x + cx, min_y + cy)
-    
+        return (min_x + best_circle[0], min_y + best_circle[1])
     return None
 
 # ==========================================
-# 🎮 6. Initialize DirectX Overlay & Pygame
+# 🎮 7. Initialize DirectX Overlay & Pygame
 # ==========================================
 pygame.init()
 pygame.font.init()
-pygame.mouse.set_visible(False)
+
+# إبقاء مؤشر الماوس ظاهراً لكي نتحكم في القائمة بسهولة
+pygame.mouse.set_visible(True)
 
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME)
 hwnd = pygame.display.get_wm_info()["window"]
@@ -238,15 +243,54 @@ camera.start(target_fps=FPS, video_mode=True)
 clock = pygame.time.Clock()
 
 pocket_font = pygame.font.SysFont("Arial", 16, bold=True)
+gui_font = pygame.font.SysFont("Segoe UI", 13, bold=True)
+gui_title_font = pygame.font.SysFont("Segoe UI", 11)
+
 running = True
 
 # ==========================================
-# 🔄 7. Core Loop
+# 🔄 8. Core Loop
 # ==========================================
 while running:
     clock.tick(FPS)
+    
+    try:
+        mx, my = win32api.GetCursorPos()
+        last_known_mx, last_known_my = mx, my
+    except Exception:
+        mx, my = last_known_mx, last_known_my
+
+    # الفحص: هل الماوس داخل حدود القائمة العائمة؟
+    is_mouse_hovering_gui = (gui_x <= mx <= gui_x + gui_w) and (gui_y <= my <= gui_y + gui_h)
+
+    # تفعيل الماوس فقط عندما يقف المستخدم على القائمة، لكي لا يعيق اللعب بالماوس داخل الطاولة
+    if is_mouse_hovering_gui and not window_has_focus:
+        win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST)
+        window_has_focus = True
+    elif not is_mouse_hovering_gui and window_has_focus:
+        win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST | win32con.WS_EX_NOACTIVATE)
+        window_has_focus = False
+        is_dragging = False
+
+    # التعامل مع أحداث الضغط بالماوس داخل القائمة العائمة
     for event in pygame.event.get():
-        if event.type == pygame.QUIT: running = False
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if is_mouse_hovering_gui:
+                # التحقق إذا ضغط على زر الخروج (Exit Button) الإحداثيات نسبية داخل القائمة
+                if (gui_x + 15 <= mx <= gui_x + gui_w - 15) and (gui_y + 50 <= my <= gui_y + 85):
+                    running = False
+                else:
+                    # بدء سحب القائمة بالماوس لتغيير مكانها
+                    is_dragging = True
+                    drag_offset_x = mx - gui_x
+                    drag_offset_y = my - gui_y
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            is_dragging = False
+
+    if is_dragging:
+        gui_x = max(0, min(SCREEN_WIDTH - gui_w, mx - drag_offset_x))
+        gui_y = max(0, min(SCREEN_HEIGHT - gui_h, my - drag_offset_y))
+
     if keyboard.is_pressed("ctrl+q"): running = False
 
     win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
@@ -264,11 +308,9 @@ while running:
 
     gray = cv2.cvtColor(table, cv2.COLOR_BGR2GRAY)
     blur = cv2.medianBlur(cv2.equalizeHist(gray), 5)
-
     circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30, param1=70, param2=22, minRadius=12, maxRadius=20)
 
     raw_white_det = None
-    mx, my = win32api.GetCursorPos()
 
     pockets = [
         (x + 24, y + 24), (x + w // 2, y + 14), (x + w - 24, y + 24),
@@ -281,6 +323,7 @@ while running:
 
     screen.fill(TRANSPARENT)
 
+    # 1. التتبع التلقائي العادي للكرة البيضاء
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         for (cx, cy, r) in circles:
@@ -292,12 +335,25 @@ while running:
                 raw_white_det = (cx, cy)
                 break 
 
+    # 🌟 ميزة المغناطيس اليدوي المضافة للكرة البيضاء عند الضغط على حرف A
+    if keyboard.is_pressed("a") and time.time() - last_white_lock_time > 0.15:
+        mouse_table_x = mx - x
+        mouse_table_y = my - y
+        precise_white = find_precise_ball_center_near_mouse(table, mouse_table_x, mouse_table_y)
+        
+        if precise_white is not None:
+            white_memory.manual_lock(int(precise_white[0] + x), int(precise_white[1] + y))
+        else:
+            white_memory.manual_lock(mx, my)
+        last_white_lock_time = time.time()
+
     stable_white = white_memory.update(raw_white_det)
 
     if stable_white:
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS, WHITE)
         pygame.gfxdraw.aacircle(screen, int(stable_white[0]), int(stable_white[1]), BALL_RADIUS - 2, CYAN)
 
+    # تحديد الكرة المستهدفة عند الضغط على Z
     if keyboard.is_pressed("z") and time.time() - last_lock_time > 0.15:
         mouse_table_x = mx - x
         mouse_table_y = my - y
@@ -328,13 +384,10 @@ while running:
         txt = pocket_font.render(f"{idx+1}", True, WHITE if idx == selected_pocket else ORANGE)
         screen.blit(txt, (p[0] - 5, p[1] - 25 if idx < 3 else p[1] + 10))
 
-    # ==========================================
-    # 🎯 8. Dynamic Controlled Ray-Trace Engine
-    # ==========================================
+    # محرك الرصد المباشر (ستريت وباند يدوي)
     if stable_white and stable_target:
         active_pocket = pockets[selected_pocket]
         
-        # 🟢 رصد الحروف والتحكم اليدوي في اتجاه الباند المفرد بناءً على طلبك
         chosen_side = None
         if keyboard.is_pressed("i"): chosen_side = 'top'
         elif keyboard.is_pressed("m"): chosen_side = 'bottom'
@@ -342,31 +395,46 @@ while running:
         elif keyboard.is_pressed("k"): chosen_side = 'right'
 
         if chosen_side:
-            # 1. حساب الباند اليدوي المختار فوراً
             bank_point = calculate_manual_bank_point(stable_target, active_pocket, table_bounds, chosen_side)
-            
             if bank_point:
                 g_pos = ghost_ball(stable_target, bank_point, BALL_RADIUS)
-                # رسم الخطوط الثلاثية المتوازية للـ Ghost ball الموجهة للباند
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
-                
-                # خط من الكرة المحددة للباند (أصفر) ومن الباند للبوكيت (وردي)
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), (int(bank_point[0]), int(bank_point[1])), 2)
                 pygame.draw.line(screen, PINK, (int(bank_point[0]), int(bank_point[1])), active_pocket, 2)
                 pygame.gfxdraw.filled_circle(screen, int(bank_point[0]), int(bank_point[1]), 4, CYAN)
             else:
-                # حل احتياطي ستريت إذا لم تتقاطع زاوية الحرف هندسياً
                 g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
                 draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
                 pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
                 pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
         else:
-            # 🎱 الوضع الافتراضي (ستريت عادي جداً ونظيف بدون أي باند عشوائي)
             g_pos = ghost_ball(stable_target, active_pocket, BALL_RADIUS)
             draw_parallel_guidelines(screen, GREEN, stable_white, g_pos, BALL_RADIUS)
             pygame.gfxdraw.aacircle(screen, int(g_pos[0]), int(g_pos[1]), BALL_RADIUS, WHITE)
             pygame.draw.line(screen, YELLOW, (int(stable_target[0]), int(stable_target[1])), active_pocket, 2)
+
+    # ==========================================
+    # 🖼️ 9. Rendering The Floating GUI Menu
+    # ==========================================
+    # الخلفية الرئيسية للقائمة (مستطيل داكن بزوايا حادة متناسق مع الألعاب)
+    pygame.draw.rect(screen, GUI_BG, (gui_x, gui_y, gui_w, gui_h))
+    pygame.draw.rect(screen, CYAN, (gui_x, gui_y, gui_w, gui_h), 1)  # إطار فسفوري رفيع جذاب
+    pygame.draw.line(screen, CYAN, (gui_x, gui_y + 25), (gui_x + gui_w, gui_y + 25), 1) # خط فاصل للعنوان
+
+    # النصوص والعناوين داخل القائمة
+    title_txt = gui_title_font.render("🎱 Billiards Tool Panel", True, CYAN)
+    screen.blit(title_txt, (gui_x + 12, gui_y + 4))
+
+    info_txt = gui_title_font.render("Drag me anywhere", True, ORANGE)
+    screen.blit(info_txt, (gui_x + 35, gui_y + 28))
+
+    # رسم زر الخروج المستطيل (Exit Button)
+    pygame.draw.rect(screen, GUI_BTN, (gui_x + 15, gui_y + 50, gui_w - 30, 32))
+    pygame.draw.rect(screen, WHITE, (gui_x + 15, gui_y + 50, gui_w - 30, 32), 1)
+    
+    exit_txt = gui_font.render("CLOSE TOOL", True, WHITE)
+    screen.blit(exit_txt, (gui_x + 38, gui_y + 56))
 
     pygame.display.update()
 
